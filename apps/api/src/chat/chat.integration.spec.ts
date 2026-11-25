@@ -28,6 +28,8 @@ import {
 } from '../retrieval/retrieval.service';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
+import { ConversationsService } from '../conversations/conversations.service';
+import { NotFoundException } from '@nestjs/common';
 
 class FakeTokenVerifier extends TokenVerifier {
   async verify(token: string): Promise<AuthUser> {
@@ -61,6 +63,36 @@ const retrieved: RetrievedChunk[] = [
   },
 ];
 
+const CONV = 'abcdefghij0123456789';
+const NEW_CONV = 'newconversation00001';
+
+/** Records what the chat flow saves; knows one existing conversation for user-1. */
+class FakeConversations {
+  history: { role: 'user' | 'assistant'; content: string }[] = [];
+  saved: unknown[] = [];
+  failAssistantSave = false;
+  assistantSaveGone = false;
+  async historyFor(uid: string, id: string) {
+    if (uid !== 'user-1' || id !== CONV)
+      throw new NotFoundException('Conversation not found');
+    return this.history;
+  }
+  async recordUserMessage(
+    uid: string,
+    id: string | undefined,
+    content: string,
+  ) {
+    this.saved.push({ kind: 'user', uid, id: id ?? null, content });
+    return id ?? NEW_CONV;
+  }
+  async recordAssistantMessage(uid: string, id: string, answer: unknown) {
+    if (this.assistantSaveGone)
+      throw new NotFoundException('Conversation not found');
+    if (this.failAssistantSave) throw new Error('firestore down');
+    this.saved.push({ kind: 'assistant', uid, id, answer });
+  }
+}
+
 class FakeRetrieval {
   available = true;
   failWith: unknown = null;
@@ -83,7 +115,7 @@ async function readEvents(res: Response): Promise<ChatStreamEvent[]> {
     .filter(Boolean)
     .map((block) => {
       const data = block.split('\n').find((line) => line.startsWith('data: '));
-      return JSON.parse(data!.slice('data: '.length)) as ChatStreamEvent;
+      return JSON.parse((data ?? '').slice('data: '.length)) as ChatStreamEvent;
     });
 }
 
@@ -92,6 +124,7 @@ describe('chat stream (integration)', () => {
   let baseUrl: string;
   const provider = new ScriptedProvider();
   const retrieval = new FakeRetrieval();
+  const conversations = new FakeConversations();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -102,6 +135,17 @@ describe('chat stream (integration)', () => {
         LlmService,
         { provide: LLM_PROVIDERS, useValue: [provider] },
         { provide: RetrievalService, useValue: retrieval },
+        {
+          provide: ConversationsService,
+          useValue: {
+            history: (uid: string, id: string) =>
+              conversations.historyFor(uid, id),
+            recordUserMessage:
+              conversations.recordUserMessage.bind(conversations),
+            recordAssistantMessage:
+              conversations.recordAssistantMessage.bind(conversations),
+          },
+        },
       ],
     })
       .overrideProvider(TokenVerifier)
@@ -123,6 +167,10 @@ describe('chat stream (integration)', () => {
     retrieval.available = true;
     retrieval.failWith = null;
     retrieval.gate = null;
+    conversations.history = [];
+    conversations.saved = [];
+    conversations.failAssistantSave = false;
+    conversations.assistantSaveGone = false;
     provider.script = async function* () {
       yield 'Refunds take ';
       yield '14 days [1].';
@@ -152,7 +200,7 @@ describe('chat stream (integration)', () => {
   it('streams deltas then a done event with citations', async () => {
     const res = await post({
       ...question,
-      conversationId: 'abcdefghij0123456789',
+      conversationId: CONV,
     });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/event-stream');
@@ -164,7 +212,7 @@ describe('chat stream (integration)', () => {
       {
         type: 'done',
         modelId: 'claude-haiku-5-5',
-        conversationId: 'abcdefghij0123456789',
+        conversationId: CONV,
         citations: [
           {
             number: 1,
@@ -181,6 +229,109 @@ describe('chat stream (integration)', () => {
     expect(provider.requests[0].messages[0].content).toContain(
       'Refunds within 14 days.',
     );
+    // Both turns are saved; the answer carries the model and citations.
+    expect(conversations.saved).toEqual([
+      {
+        kind: 'user',
+        uid: 'user-1',
+        id: CONV,
+        content: 'How long do refunds take?',
+      },
+      {
+        kind: 'assistant',
+        uid: 'user-1',
+        id: CONV,
+        answer: expect.objectContaining({
+          content: 'Refunds take 14 days [1].',
+          modelId: 'claude-haiku-5-5',
+          citations: [expect.objectContaining({ number: 1, page: 2 })],
+        }),
+      },
+    ]);
+  });
+
+  it('starts a new conversation and returns its id', async () => {
+    const events = await readEvents(await post(question));
+    expect(events.at(-1)).toMatchObject({
+      type: 'done',
+      conversationId: NEW_CONV,
+    });
+    expect(conversations.saved[0]).toMatchObject({ kind: 'user', id: null });
+  });
+
+  it('sends earlier turns as context before the grounded question', async () => {
+    conversations.history = [
+      { role: 'user', content: 'What is the policy?' },
+      { role: 'assistant', content: 'It covers refunds [1].' },
+    ];
+    await readEvents(await post({ ...question, conversationId: CONV }));
+    const sent = provider.requests[0].messages;
+    expect(sent.slice(0, 2)).toEqual([
+      { role: 'user', content: 'What is the policy?' },
+      // Old citation markers are stripped: they referred to earlier excerpts.
+      { role: 'assistant', content: 'It covers refunds.' },
+    ]);
+    expect(sent[2].role).toBe('user');
+    expect(sent[2].content).toContain('Question: How long do refunds take?');
+  });
+
+  it('returns 404 before anything else for a conversation that is not the caller’s', async () => {
+    const res = await post({
+      ...question,
+      conversationId: 'zzzzzzzzzz0123456789',
+    });
+    expect(res.status).toBe(404);
+    expect(retrieval.calls).toHaveLength(0);
+    expect(provider.requests).toHaveLength(0);
+    expect(conversations.saved).toHaveLength(0);
+  });
+
+  it('includes the conversation id in error events so a retry continues it', async () => {
+    provider.script = async function* () {
+      yield 'partial';
+      throw Object.assign(new Error('boom'), { status: 500 });
+    };
+    const events = await readEvents(await post(question));
+    expect(events.at(-1)).toMatchObject({
+      type: 'error',
+      conversationId: NEW_CONV,
+    });
+  });
+
+  it('does not save an empty answer and ends with an error event', async () => {
+    provider.script = async function* () {
+      yield* [];
+    };
+    const events = await readEvents(await post(question));
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        status: 502,
+        conversationId: NEW_CONV,
+      }),
+    ]);
+    expect(
+      conversations.saved.some(
+        (x) => (x as { kind: string }).kind === 'assistant',
+      ),
+    ).toBe(false);
+  });
+
+  it('reports a conversation deleted mid-stream as 404 without its id', async () => {
+    conversations.assistantSaveGone = true;
+    const events = await readEvents(
+      await post({ ...question, conversationId: CONV }),
+    );
+    const last = events.at(-1);
+    expect(last).toMatchObject({ type: 'error', status: 404 });
+    expect(last).not.toHaveProperty('conversationId');
+  });
+
+  it('ends with an error event instead of done when the answer cannot be saved', async () => {
+    conversations.failAssistantSave = true;
+    const events = await readEvents(await post(question));
+    expect(events.at(-1)).toMatchObject({ type: 'error', status: 502 });
+    expect(events.some((e) => e.type === 'done')).toBe(false);
   });
 
   it('rejects invalid input with a 400 JSON error before streaming', async () => {
@@ -275,9 +426,14 @@ describe('chat stream (integration)', () => {
     };
     const client = new AbortController();
     const res = await post(question, 'valid', client.signal);
-    const reader = res.body!.getReader();
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
     await reader.read(); // first delta arrived
     client.abort();
     await expect(upstreamAborted).resolves.toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The user turn stays; no (partial) assistant message is saved.
+    expect(conversations.saved).toEqual([
+      expect.objectContaining({ kind: 'user' }),
+    ]);
   });
 });

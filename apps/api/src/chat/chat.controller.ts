@@ -65,13 +65,37 @@ export class ChatController {
     res.flushHeaders();
 
     try {
+      let answer = '';
       for await (const text of prepared.stream) {
+        answer += text;
         writeEvent(res, { type: 'delta', text });
+      }
+      // Never save a partial answer from a client that left (even if the SDK
+      // ended the stream quietly instead of throwing).
+      if (abort.signal.aborted) return;
+      // An empty answer would poison the history (providers reject empty turns).
+      if (!answer.trim()) {
+        this.logger.warn(`Empty answer from model ${request.modelId}`);
+        throw new HttpException('The model returned no answer', 502);
+      }
+      // `done` means the answer is saved; a save failure ends with an error event.
+      try {
+        await this.chat.complete(user.uid, prepared, {
+          content: answer,
+          modelId: request.modelId,
+        });
+      } catch (error) {
+        // e.g. 404: the conversation was deleted while the answer streamed.
+        if (error instanceof HttpException) throw error;
+        this.logger.error(
+          `Saving the answer failed: ${describeProviderError(error)}`,
+        );
+        throw new HttpException('The answer could not be saved', 502);
       }
       writeEvent(res, {
         type: 'done',
         modelId: request.modelId,
-        conversationId: request.conversationId ?? null,
+        conversationId: prepared.conversationId,
         citations: prepared.citations,
       });
     } catch (error) {
@@ -90,6 +114,10 @@ export class ChatController {
         type: 'error',
         status: http.getStatus(),
         message: http.message,
+        // Don't point a retry at a conversation that no longer exists.
+        ...(http.getStatus() === 404
+          ? {}
+          : { conversationId: prepared.conversationId }),
       });
     } finally {
       if (!res.writableEnded) res.end();
