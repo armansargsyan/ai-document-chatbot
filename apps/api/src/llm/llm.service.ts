@@ -49,6 +49,25 @@ export class LlmService {
     this.providers = new Map(providers.map((p) => [p.id, p]));
   }
 
+  /** Throws 400 for a model outside the allow-list, 503 if its provider has no key. */
+  assertAvailable(modelId: string): void {
+    this.resolve(modelId);
+  }
+
+  private resolve(modelId: string) {
+    if (!isLlmModelId(modelId)) {
+      throw new BadRequestException('Unknown model');
+    }
+    const model = getLlmModel(modelId);
+    const provider = this.providers.get(model.provider);
+    if (!provider) {
+      throw new ServiceUnavailableException(
+        'The selected model is unavailable',
+      );
+    }
+    return { model, provider };
+  }
+
   listModels(): LlmModelsResponse {
     return {
       models: LLM_MODELS.map((m) => ({
@@ -68,16 +87,7 @@ export class LlmService {
    * If `options.signal` aborted, throws `LlmRequestAbortedError` instead.
    */
   async *streamChat(options: StreamChatOptions): AsyncIterable<string> {
-    if (!isLlmModelId(options.modelId)) {
-      throw new BadRequestException('Unknown model');
-    }
-    const model = getLlmModel(options.modelId);
-    const provider = this.providers.get(model.provider);
-    if (!provider) {
-      throw new ServiceUnavailableException(
-        'The selected model is unavailable',
-      );
-    }
+    const { model, provider } = this.resolve(options.modelId);
 
     // Our own time-to-first-token limit, distinguishable from the caller's abort.
     const firstToken = new AbortController();
