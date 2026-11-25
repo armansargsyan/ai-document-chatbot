@@ -6,8 +6,8 @@ import {
 } from '@angular/core';
 import {
   provideHttpClient,
-  withFetch,
   withInterceptors,
+  withXhr,
 } from '@angular/common/http';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { provideSpartanHlm } from '@spartan-ng/helm/utils';
@@ -21,7 +21,8 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideRouter(appRoutes, withComponentInputBinding()),
-    provideHttpClient(withFetch(), withInterceptors([authInterceptor])),
+    // XHR, not fetch: only XHR reports upload progress (PDF uploads show a %).
+    provideHttpClient(withXhr(), withInterceptors([authInterceptor])),
     provideSpartanHlm(),
     { provide: AuthClient, useClass: FirebaseAuthClient },
     // Firebase config comes from the api at startup, never from literals.

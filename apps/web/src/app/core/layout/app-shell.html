@@ -1,0 +1,80 @@
+<div class="flex min-h-dvh flex-col bg-background text-foreground">
+  <header
+    class="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+  >
+    <div
+      class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:gap-6 sm:px-6"
+    >
+      <a
+        routerLink="/"
+        class="flex items-center gap-2 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        aria-label="AI Document Chatbot, home"
+      >
+        <app-logo class="size-6" />
+        <span class="hidden text-sm font-semibold tracking-tight sm:inline"
+          >AI Document Chatbot</span
+        >
+      </a>
+
+      <nav aria-label="Main" class="flex items-center gap-1">
+        @for (item of nav; track item.path) {
+        <a
+          [routerLink]="item.path"
+          routerLinkActive="bg-muted text-foreground"
+          [routerLinkActiveOptions]="{ exact: item.exact }"
+          ariaCurrentWhenActive="page"
+          class="rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          >{{ item.label }}</a
+        >
+        }
+      </nav>
+
+      <div class="ml-auto flex items-center gap-3">
+        @if (me.hasValue()) { @if (picture(); as src) {
+        <img
+          [src]="src"
+          alt=""
+          referrerpolicy="no-referrer"
+          class="size-8 rounded-full border border-border object-cover"
+          data-testid="avatar"
+          (error)="onAvatarError()"
+        />
+        } @else {
+        <span
+          class="flex size-8 items-center justify-center rounded-full bg-muted text-sm font-medium"
+          data-testid="avatar"
+          aria-hidden="true"
+          >{{ initial() }}</span
+        >
+        }
+        <span
+          class="hidden max-w-40 truncate text-sm md:inline"
+          data-testid="user-name"
+          >{{ displayName() }}</span
+        >
+        }
+        <button
+          hlmBtn
+          variant="outline"
+          size="sm"
+          [disabled]="signingOut()"
+          (click)="signOut()"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  </header>
+  @if (signOutError()) {
+  <p
+    class="border-b border-border bg-muted px-4 py-2 text-center text-sm text-destructive sm:px-6"
+    role="alert"
+  >
+    Couldn’t sign you out. Try again.
+  </p>
+  }
+
+  <div class="flex flex-1 flex-col">
+    <router-outlet />
+  </div>
+</div>
