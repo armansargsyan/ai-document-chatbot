@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     name: 'api',
     environment: 'node',
+    watch: false,
     include: ['src/**/*.spec.ts'],
     passWithNoTests: true,
     coverage: { reportsDirectory: '../../coverage/apps/api' },
