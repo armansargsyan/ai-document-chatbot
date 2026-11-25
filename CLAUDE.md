@@ -60,7 +60,7 @@ npx nx g @nx/angular:component …          # prefer Nx generators for scaffoldi
 
 ## Testing
 
-- Co-locate specs (`*.spec.ts`). web: Vitest + `TestBed` (use `provideHttpClientTesting()`, `TestBed.tick()` / `fixture.whenStable()` — no zone helpers like `fakeAsync`). api/shared: Vitest + `@nestjs/testing` — import `describe`/`it`/`expect`/`vi` from `vitest` (no globals).
+- Co-locate specs (`*.spec.ts`). web: Vitest + `TestBed` (use `provideHttpClientTesting()`, `TestBed.tick()` / `fixture.whenStable()` — no zone helpers like `fakeAsync`). api: Vitest + `@nestjs/testing`; shared: plain Vitest. Import `describe`/`it`/`expect`/`vi` from `vitest` (no globals).
 - Mock external services (LLMs, Firebase) — tests must not hit the network.
 
 ## Before finishing any task
