@@ -69,6 +69,8 @@
     "@angular/forms": "~22.2.0",
     "@angular/platform-browser": "~22.2.0",
     "@angular/router": "~22.2.0",
+    "@anthropic-ai/sdk": "^1.14.0",
+    "@google/genai": "^3.6.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^12.1.1",
     "@nestjs/core": "^11.0.0",
@@ -77,6 +79,7 @@
     "class-variance-authority": "^0.7.0",
     "cn": "^0.5.2",
     "firebase-admin": "^14.5.1",
+    "openai": "^7.64.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "~7.8.0",
     "zod": "^4.6.7"
