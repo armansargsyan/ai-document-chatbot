@@ -30,3 +30,12 @@ npx nx graph           # project graph
 ```
 
 Add spartan/ui primitives with `npx nx g @spartan-ng/cli:ui <name>`.
+
+## Firebase
+
+Project: `ai-doc-chatbot-demo` (default in `.firebaserc`). Uses Authentication (Google sign-in), Cloud Firestore (`nam5`, native mode) and Cloud Storage.
+
+- **Security rules** (`firestore.rules`, `storage.rules`) deny all direct client access. The browser only signs in with Firebase Auth; every read and write goes through the NestJS api, which uses the Firebase Admin SDK.
+- **Web config**: run `firebase apps:sdkconfig web` and copy the values into the `FIREBASE_*` entries in `.env`.
+- **Admin credentials (local)**: run `gcloud auth application-default login`, or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account key. Never commit the key.
+- **Deploy rules/indexes**: `firebase deploy --only firestore`. Add `,storage` once Storage is provisioned: it needs the Blaze plan, so link a billing account and set a budget alert first. Until then a bare `firebase deploy` fails.

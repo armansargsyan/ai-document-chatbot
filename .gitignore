@@ -57,7 +57,8 @@ __screenshots__/
 !.env.example
 *.pem
 service-account*.json
-firebase-adminsdk*.json
+*firebase-adminsdk*.json
+ai-doc-chatbot-demo-*.json
 
 # firebase
 .firebase/
