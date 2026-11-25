@@ -6,6 +6,18 @@
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Follow the OS colour scheme via the `.dark` class the spartan theme uses.
+      (function () {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        var apply = function () {
+          document.documentElement.classList.toggle('dark', mq.matches);
+        };
+        apply();
+        mq.addEventListener('change', apply);
+      })();
+    </script>
   </head>
   <body>
     <app-root></app-root>

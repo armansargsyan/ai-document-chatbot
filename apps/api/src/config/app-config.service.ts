@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { ClientConfigResponse } from '@ai-document-chatbot/shared';
 import type { Env } from './env.schema';
 
 export interface LlmApiKeys {
@@ -51,6 +52,33 @@ export class AppConfigService {
       uploadsPerDay: this.config.get('RATE_LIMIT_UPLOADS_PER_DAY', {
         infer: true,
       }),
+    };
+  }
+
+  /**
+   * Public Firebase web config for the browser (null if not configured). Not a
+   * secret: Firebase web config is public by design; access is enforced by
+   * Auth + the api, and security rules deny direct client access.
+   */
+  get clientConfig(): ClientConfigResponse | null {
+    const apiKey = this.config.get('FIREBASE_API_KEY', { infer: true });
+    const authDomain = this.config.get('FIREBASE_AUTH_DOMAIN', { infer: true });
+    const appId = this.config.get('FIREBASE_APP_ID', { infer: true });
+    if (!apiKey || !authDomain || !appId) return null;
+    const emulator = this.config.get('FIREBASE_AUTH_EMULATOR_HOST', {
+      infer: true,
+    });
+    return {
+      firebase: {
+        apiKey,
+        authDomain,
+        appId,
+        projectId: this.config.get('FIREBASE_PROJECT_ID', { infer: true }),
+        messagingSenderId:
+          this.config.get('FIREBASE_MESSAGING_SENDER_ID', { infer: true }) ??
+          null,
+      },
+      authEmulatorUrl: emulator ? `http://${emulator}` : null,
     };
   }
 
