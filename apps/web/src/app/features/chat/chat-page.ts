@@ -223,7 +223,8 @@ export class ChatPage {
   protected jumpToLatest(): void {
     this.atBottom.set(true);
     // A smooth scroll would fall behind new deltas while streaming.
-    this.scrollToBottom(this.store.streaming() ? 'auto' : 'smooth');
+    const smooth = !this.store.streaming() && !this.prefersReducedMotion();
+    this.scrollToBottom(smooth ? 'smooth' : 'auto');
     this.refocusComposer();
   }
 
@@ -256,6 +257,12 @@ export class ChatPage {
     } else {
       el.scrollTop = el.scrollHeight;
     }
+  }
+
+  private prefersReducedMotion(): boolean {
+    return !!this.document.defaultView?.matchMedia?.(
+      '(prefers-reduced-motion: reduce)',
+    ).matches;
   }
 
   private refocusComposer(): void {

@@ -236,6 +236,10 @@ describe('ChatPage', () => {
         'No AI models are available',
       );
       expect(q<HTMLTextAreaElement>('composer-input')?.disabled).toBe(true);
+      // Short enough not to clip in the one-line composer on a phone.
+      expect(q<HTMLTextAreaElement>('composer-input')?.placeholder).toBe(
+        'Sending is unavailable',
+      );
       expect(q<HTMLButtonElement>('composer-send')?.disabled).toBe(true);
       expect(
         el().querySelector<HTMLSelectElement>('#chat-model')?.disabled,
@@ -351,6 +355,62 @@ describe('ChatPage', () => {
       await stable();
       expect(q('jump-to-latest')).toBeNull();
       body.close();
+    });
+  });
+
+  describe('jump to latest scrolling', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    async function scrolledUpAnswer() {
+      await render();
+      const body = fake.stream();
+      await typeAndSend('Hi');
+      await answer(body);
+      const scroller = must<HTMLElement>(el(), '[data-testid="chat-scroller"]');
+      Object.defineProperties(scroller, {
+        scrollHeight: { value: 2000, configurable: true },
+        clientHeight: { value: 500, configurable: true },
+      });
+      scroller.scrollTop = 200;
+      scroller.dispatchEvent(new Event('scroll'));
+      await stable();
+      const scrollTo = vi.fn();
+      scroller.scrollTo = scrollTo;
+      return scrollTo;
+    }
+
+    function stubReducedMotion(reduce: boolean) {
+      vi.stubGlobal(
+        'matchMedia',
+        (query: string) =>
+          ({
+            matches: reduce && query.includes('prefers-reduced-motion'),
+            media: query,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+          }) as unknown as MediaQueryList,
+      );
+    }
+
+    it('scrolls smoothly once the answer has finished', async () => {
+      stubReducedMotion(false);
+      const scrollTo = await scrolledUpAnswer();
+      must<HTMLButtonElement>(el(), '[data-testid="jump-to-latest"]').click();
+      await stable();
+      expect(scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({ behavior: 'smooth' }),
+      );
+    });
+
+    it('jumps without animation when the user prefers reduced motion', async () => {
+      stubReducedMotion(true);
+      const scrollTo = await scrolledUpAnswer();
+      must<HTMLButtonElement>(el(), '[data-testid="jump-to-latest"]').click();
+      await stable();
+      expect(scrollTo).toHaveBeenCalled();
+      for (const [options] of scrollTo.mock.calls) {
+        expect(options).toEqual(expect.objectContaining({ behavior: 'auto' }));
+      }
     });
   });
 
