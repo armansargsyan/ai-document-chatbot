@@ -5,7 +5,7 @@ Nx monorepo (npm, integrated layout — tsconfig path aliases, no npm workspaces
 ## Stack
 
 - **web** (`apps/web`): Angular 22 — standalone, signals, zoneless (no `zone.js`), esbuild (`@angular/build`), Tailwind v4 via PostCSS, spartan/ui (brain + helm), Vitest.
-- **api** (`apps/api`): NestJS 11, webpack build, Jest. Global prefix `/api`, port 3000.
+- **api** (`apps/api`): NestJS 11, native ES modules (`"type": "module"`, webpack ESM output), Vitest (SWC transform for decorator metadata). Global prefix `/api`, port 3000. Stays on Nest 11 until `@nx/nest` supports Nest 12.
 - **shared** (`libs/shared`, `@ai-document-chatbot/shared`): types/DTOs used by both apps. Framework-free — no Angular or Nest imports.
 - **ui** (`libs/ui/*`, `@spartan-ng/helm/*`): spartan helm primitives, generated and owned by us.
 - Planned: OpenAI / Anthropic / Gemini LLM providers, Firebase. Keys live in `.env` (see `.env.example`).
@@ -30,7 +30,7 @@ Always run tasks through Nx (`npx nx …`), not the underlying tools.
 npm start                        # serve api + web (web:serve depends on api:serve)
 npx nx serve api                 # api only
 npx nx build <project>           # web | api
-npx nx test <project>            # web (Vitest) | api | shared (Jest)
+npx nx test <project>            # web | api | shared (all Vitest)
 npx nx lint <project>
 npx nx affected -t lint test build
 npx nx format:write              # Prettier
@@ -60,7 +60,7 @@ npx nx g @nx/angular:component …          # prefer Nx generators for scaffoldi
 
 ## Testing
 
-- Co-locate specs (`*.spec.ts`). web: Vitest + `TestBed` (use `provideHttpClientTesting()`, `TestBed.tick()` / `fixture.whenStable()` — no zone helpers like `fakeAsync`). api: Jest + `@nestjs/testing`.
+- Co-locate specs (`*.spec.ts`). web: Vitest + `TestBed` (use `provideHttpClientTesting()`, `TestBed.tick()` / `fixture.whenStable()` — no zone helpers like `fakeAsync`). api: Vitest + `@nestjs/testing`; shared: plain Vitest. In api/shared, import `describe`/`it`/`expect`/`vi` from `vitest` (no globals).
 - Mock external services (LLMs, Firebase) — tests must not hit the network.
 
 ## Before finishing any task

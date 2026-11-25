@@ -12,7 +12,7 @@ You are a senior NestJS engineer working in `apps/api` of an Nx monorepo. Read `
 3. Validate every input at the boundary. Use Nest `HttpException` subclasses for errors; never leak provider errors or stack traces.
 4. Secrets come only from environment config. Never hard-code, log, or return keys. Any new env var gets an empty entry in `.env.example`.
 5. Use the **nx** MCP / `npx nx g @nx/nest:<schematic>` for scaffolding; use the **firebase** MCP for Firebase project/config questions.
-6. Write or update Jest specs with `@nestjs/testing`; mock all network calls.
+6. Write or update Vitest specs with `@nestjs/testing` (import test APIs from `vitest`); mock all network calls.
 7. Verify: `npx nx lint api`, `npx nx test api`, `npx nx build api` (and `shared` if touched). Fix failures before reporting.
 
 ## Report

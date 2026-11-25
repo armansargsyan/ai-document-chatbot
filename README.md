@@ -5,7 +5,7 @@ Nx monorepo for an AI document chatbot.
 | Project           | Path          | Stack                                                                |
 | ----------------- | ------------- | -------------------------------------------------------------------- |
 | `web`             | `apps/web`    | Angular 22 (standalone, signals, zoneless), Tailwind v4, spartan/ui  |
-| `api`             | `apps/api`    | NestJS 11                                                            |
+| `api`             | `apps/api`    | NestJS 11 (ES modules)                                               |
 | `shared`          | `libs/shared` | Types/DTOs shared by `web` and `api` (`@ai-document-chatbot/shared`) |
 | `button`, `utils` | `libs/ui`     | spartan/ui helm primitives (`@spartan-ng/helm/*`)                    |
 
@@ -23,7 +23,7 @@ npm start              # serves api (http://localhost:3000/api) + web (http://lo
 
 ```sh
 npm run build          # build all projects
-npm test               # unit tests (Vitest for web, Jest for api/shared)
+npm test               # unit tests (Vitest for all projects)
 npm run lint           # ESLint (incl. module-boundary rules)
 npm run format         # Prettier
 npx nx graph           # project graph
