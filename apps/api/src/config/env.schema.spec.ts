@@ -63,4 +63,21 @@ describe('validateEnv', () => {
     expect(message).toContain('Invalid environment configuration');
     expect(message).not.toContain(secret);
   });
+
+  it('applies rate-limit defaults and accepts overrides', () => {
+    const env = validateEnv({ ...base, RATE_LIMIT_CHAT_PER_MINUTE: '5' });
+    expect(env.RATE_LIMIT_CHAT_PER_MINUTE).toBe(5);
+    expect(env.RATE_LIMIT_CHAT_PER_DAY).toBe(200);
+    expect(env.RATE_LIMIT_UPLOADS_PER_HOUR).toBe(10);
+    expect(env.RATE_LIMIT_UPLOADS_PER_DAY).toBe(30);
+  });
+
+  it('rejects non-positive or non-numeric rate limits', () => {
+    expect(() =>
+      validateEnv({ ...base, RATE_LIMIT_UPLOADS_PER_DAY: '0' }),
+    ).toThrow(/RATE_LIMIT_UPLOADS_PER_DAY: must be at least 1/);
+    expect(() =>
+      validateEnv({ ...base, RATE_LIMIT_CHAT_PER_DAY: 'lots' }),
+    ).toThrow(/RATE_LIMIT_CHAT_PER_DAY: must be a number/);
+  });
 });
