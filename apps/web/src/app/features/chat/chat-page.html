@@ -1,9 +1,52 @@
-<!-- #12: the conversation history aside goes here, before the main column. -->
+<aside
+  class="hidden w-68 shrink-0 flex-col border-r border-border bg-muted/30 lg:flex"
+  data-testid="history-aside"
+>
+  <app-chat-sidebar class="flex-1" />
+</aside>
+
 <main
   class="relative flex min-w-0 flex-1 flex-col"
   aria-labelledby="chat-title"
 >
-  <h1 id="chat-title" class="sr-only">{{ store.title() || 'New chat' }}</h1>
+  <h1 id="chat-title" class="sr-only">{{ title() }}</h1>
+  <!-- Below lg the history is a drawer, opened from this bar. -->
+  <div
+    class="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2 sm:px-4 lg:hidden"
+    data-testid="chat-toolbar"
+  >
+    <button
+      hlmBtn
+      variant="ghost"
+      size="sm"
+      aria-haspopup="dialog"
+      [attr.aria-expanded]="historyOpen()"
+      data-testid="history-toggle"
+      (click)="historyOpen.set(true)"
+    >
+      <ng-icon name="lucidePanelLeft" aria-hidden="true" />
+      History
+    </button>
+    <p
+      class="min-w-0 flex-1 truncate px-1 text-center text-sm font-medium"
+      aria-hidden="true"
+      data-testid="toolbar-title"
+    >
+      {{ title() }}
+    </p>
+    <a
+      hlmBtn
+      variant="ghost"
+      size="icon-sm"
+      routerLink="/chat"
+      aria-label="New chat"
+      title="New chat"
+      data-testid="toolbar-new-chat"
+      (click)="newChat($event)"
+    >
+      <ng-icon name="lucidePlus" aria-hidden="true" />
+    </a>
+  </div>
   <!-- One summary per answer; the log itself is aria-busy while text streams. -->
   <p
     class="sr-only"
@@ -418,5 +461,25 @@
       >
     </hlm-sheet-footer>
     }
+  </hlm-sheet-content>
+</hlm-sheet>
+
+<hlm-sheet
+  side="left"
+  [state]="historyOpen() ? 'open' : 'closed'"
+  (closed)="historyOpen.set(false)"
+>
+  <hlm-sheet-content
+    *hlmSheetPortal="let ctx"
+    class="w-[min(18rem,85vw)] gap-0 p-0"
+    data-testid="history-drawer"
+  >
+    <hlm-sheet-header class="border-b border-border pr-12">
+      <h2 hlmSheetTitle>Chat history</h2>
+    </hlm-sheet-header>
+    <app-chat-sidebar
+      class="min-h-0 flex-1"
+      (navigated)="historyOpen.set(false)"
+    />
   </hlm-sheet-content>
 </hlm-sheet>

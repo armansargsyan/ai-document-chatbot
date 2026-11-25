@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { HttpErrorResponse, httpResource } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { Subject } from 'rxjs';
 import {
   MAX_CHAT_MESSAGE_LENGTH,
   type Citation,
@@ -37,6 +38,19 @@ export interface ChatEntry {
   readonly error?: string;
   /** What an assistant turn answers: re-sent by Retry. */
   readonly request?: { readonly message: string; readonly modelId: LlmModelId };
+}
+
+/**
+ * A message was saved to a conversation (it may have just been created).
+ * Emitted on the stream's `start` and `done`, so the history list can show a
+ * new conversation straight away and move one to the top on new activity.
+ */
+export interface ConversationActivity {
+  readonly conversationId: string;
+  /** The user's message, for a title until the server's list is reloaded. */
+  readonly message: string;
+  /** ISO 8601. */
+  readonly at: string;
 }
 
 export type HistoryState = 'none' | 'loading' | 'ready' | 'not-found' | 'error';
@@ -104,10 +118,24 @@ export class ChatStore {
   /** Short status for screen readers (not every delta). */
   readonly announcement = this._announcement.asReadonly();
 
+  private readonly _activity = new Subject<ConversationActivity>();
+  /** Page-scoped event stream; see {@link ConversationActivity}. */
+  readonly activity = this._activity.asObservable();
+  private readonly _forgotten = new Subject<string>();
+  /**
+   * Ids of conversations found gone mid-stream (404 after `start`), so the
+   * history list can drop a row it added for them.
+   */
+  readonly forgotten = this._forgotten.asObservable();
+
   private controller: AbortController | null = null;
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.cancel());
+    inject(DestroyRef).onDestroy(() => {
+      this.cancel();
+      this._activity.complete();
+      this._forgotten.complete();
+    });
   }
 
   /**
@@ -117,6 +145,19 @@ export class ChatStore {
    */
   open(conversationId: string | undefined): void {
     if (conversationId === this._conversationId()) return;
+    this.show(conversationId);
+  }
+
+  /**
+   * Starts over with an empty chat, even when no conversation id is set
+   * (e.g. turns kept after {@link forgetConversation}). Call it before
+   * navigating to `/chat`; the route's `open(undefined)` is then a no-op.
+   */
+  reset(): void {
+    this.show(undefined);
+  }
+
+  private show(conversationId: string | undefined): void {
     this.cancel();
     this._announcement.set('');
     this._conversationId.set(conversationId);
@@ -218,7 +259,7 @@ export class ChatStore {
         if (!current()) return; // stopped or cancelled meanwhile
         if (event.type === 'start') {
           // Known from the first event, so Stop before `done` keeps this conversation.
-          this.adopt(event.conversationId);
+          this.adopt(event.conversationId, message);
         } else if (event.type === 'delta') {
           this.patch(entryId, (e) => ({
             content: e.content + event.text,
@@ -230,7 +271,7 @@ export class ChatStore {
             citations: event.citations,
             modelId: event.modelId,
           });
-          this.adopt(event.conversationId);
+          this.adopt(event.conversationId, message);
           this._announcement.set('Answer complete.');
         }
       }
@@ -246,7 +287,7 @@ export class ChatStore {
         // forget it so Retry starts a fresh one instead of 404ing forever.
         this.forgetConversation();
       } else if (chatError.conversationId) {
-        this.adopt(chatError.conversationId);
+        this.adopt(chatError.conversationId, message);
       }
       this.patch(entryId, { status: 'error', error: chatError.message });
       this._announcement.set(`Couldn’t answer: ${chatError.message}`);
@@ -263,9 +304,14 @@ export class ChatStore {
    * put in the URL without reloading: the route reuses this page and
    * {@link open} sees it is already shown.
    */
-  private adopt(conversationId: string): void {
+  private adopt(conversationId: string, message: string): void {
     const isNew = this._conversationId() !== conversationId;
     this._conversationId.set(conversationId);
+    this._activity.next({
+      conversationId,
+      message,
+      at: new Date().toISOString(),
+    });
     if (isNew) {
       void this.router.navigate(['/chat', conversationId], {
         replaceUrl: true,
@@ -274,10 +320,12 @@ export class ChatStore {
   }
 
   private forgetConversation(): void {
-    if (this._conversationId() === undefined) return;
+    const id = this._conversationId();
+    if (id === undefined) return;
     // Keep the visible turns: only the id is dropped. `open(undefined)` from
     // the route change is then a no-op because it already matches.
     this._conversationId.set(undefined);
+    this._forgotten.next(id);
     void this.router.navigate(['/chat'], { replaceUrl: true });
   }
 

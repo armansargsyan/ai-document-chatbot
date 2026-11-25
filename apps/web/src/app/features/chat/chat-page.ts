@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DOCUMENT,
+  DestroyRef,
   ElementRef,
   Injector,
   afterNextRender,
@@ -16,6 +17,8 @@ import {
 } from '@angular/core';
 import { httpResource } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
+import { NgIcon, provideIcons } from '@ng-icons/core';
+import { lucidePanelLeft, lucidePlus } from '@ng-icons/lucide';
 import {
   getLlmModel,
   isLlmModelId,
@@ -30,10 +33,15 @@ import { AppLogo } from '../../core/layout/app-logo';
 import { ChatComposer } from './chat-composer';
 import { ChatMarkdown } from './chat-markdown';
 import { ChatModels } from './chat-models';
+import { ChatSidebar, opensElsewhere } from './chat-sidebar';
 import { ChatStore, type ChatEntry } from './chat-store';
+import { ConversationList } from './conversation-list';
 
 /** Within this many px of the bottom counts as "at the latest message". */
 const BOTTOM_SLACK_PX = 48;
+
+/** Tailwind `lg`: from here the history is a persistent aside, not a drawer. */
+const DESKTOP_QUERY = '(min-width: 64rem)';
 
 export const EXAMPLE_PROMPTS = [
   'Summarize the key points of my latest document',
@@ -53,21 +61,29 @@ function referencedNumbers(text: string): Set<number> {
     AppLogo,
     ChatComposer,
     ChatMarkdown,
+    ChatSidebar,
+    NgIcon,
     HlmButtonImports,
     HlmNativeSelectImports,
     HlmSheetImports,
     HlmSkeletonImports,
   ],
-  providers: [ChatStore, ChatModels],
+  providers: [
+    ChatStore,
+    ChatModels,
+    ConversationList,
+    provideIcons({ lucidePanelLeft, lucidePlus }),
+  ],
   templateUrl: './chat-page.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Fills the viewport under the shell header (h-14 + 1px border), so the
-  // message list scrolls on its own and a history aside (#12) can sit beside it.
+  // message list scrolls on its own beside the history aside.
   host: { class: 'flex h-[calc(100dvh-3.5rem-1px)] min-h-0' },
 })
 export class ChatPage {
   protected readonly store = inject(ChatStore);
   protected readonly models = inject(ChatModels);
+  protected readonly conversations = inject(ConversationList);
   private readonly injector = inject(Injector);
   private readonly document = inject(DOCUMENT);
 
@@ -102,6 +118,17 @@ export class ChatPage {
   /** False once the user scrolls up; sending or "Jump to latest" sets it again. */
   protected readonly atBottom = signal(true);
 
+  /** The open conversation's title; follows a rename in the sidebar. */
+  protected readonly title = computed(
+    () =>
+      this.conversations.find(this.store.conversationId())?.title ??
+      this.store.title() ??
+      'New chat',
+  );
+
+  /** The history drawer below `lg`. */
+  protected readonly historyOpen = signal(false);
+
   /** The citation shown in the source panel (kept while it animates closed). */
   protected readonly source = signal<Citation | null>(null);
   protected readonly sourceOpen = signal(false);
@@ -111,6 +138,18 @@ export class ChatPage {
   private readonly composer = viewChild(ChatComposer);
 
   constructor() {
+    // Growing to desktop width while the drawer is open: the aside takes over.
+    const media = this.document.defaultView?.matchMedia?.(DESKTOP_QUERY);
+    if (media) {
+      const onChange = (e: MediaQueryListEvent) => {
+        if (e.matches) this.historyOpen.set(false);
+      };
+      media.addEventListener('change', onChange);
+      inject(DestroyRef).onDestroy(() =>
+        media.removeEventListener('change', onChange),
+      );
+    }
+
     // The route drives which conversation is shown. The store ignores the id
     // it just put in the URL itself (a new conversation).
     effect(() => {
@@ -149,6 +188,13 @@ export class ChatPage {
     if (!modelId || !this.store.send(message, modelId)) return;
     this.draft.set('');
     this.atBottom.set(true);
+    this.refocusComposer();
+  }
+
+  /** New chat from the page header (below `lg`). */
+  protected newChat(event: MouseEvent): void {
+    if (opensElsewhere(event)) return;
+    this.store.reset();
     this.refocusComposer();
   }
 

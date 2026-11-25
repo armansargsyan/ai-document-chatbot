@@ -16,7 +16,7 @@ import {
 } from '../../core/auth/testing/fake-auth-client';
 import { FETCH } from './chat-api';
 import { CHAT_SERVER_MESSAGE } from './chat-errors';
-import { ChatStore } from './chat-store';
+import { ChatStore, type ConversationActivity } from './chat-store';
 import { CITATIONS, FakeFetch, sse } from './testing/fake-fetch';
 
 const MODEL = 'claude-haiku-5-5' as const;
@@ -340,5 +340,63 @@ describe('ChatStore', () => {
     await settle();
     // The aborted stream wrote nothing into the newly opened conversation.
     expect(store.entries().map((e) => e.id)).toEqual(['m1', 'm2']);
+  });
+
+  describe('reset', () => {
+    it('clears turns kept after a conversation was forgotten', async () => {
+      fake.events(
+        { type: 'start', conversationId: 'c-gone' },
+        { type: 'error', status: 404, message: 'Conversation not found' },
+      );
+      store.send('Summarize', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(store.conversationId()).toBeUndefined();
+      // The route's open(undefined) can't clear these: the id already matches.
+      store.open(undefined);
+      expect(store.entries()).toHaveLength(2);
+
+      store.reset();
+      expect(store.entries()).toEqual([]);
+      expect(store.announcement()).toBe('');
+      expect(store.historyState()).toBe('none');
+    });
+
+    it('stops a running answer and drops the open conversation', async () => {
+      store.open('c-old');
+      TestBed.tick();
+      httpMock.expectOne('/api/conversations/c-old').flush(DETAIL);
+      await settle();
+      const body = fake.stream();
+      store.send('More?', MODEL);
+      await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+
+      store.reset();
+      expect(store.streaming()).toBe(false);
+      expect(store.conversationId()).toBeUndefined();
+      expect(store.entries()).toEqual([]);
+      expect(fake.calls[0].init?.signal?.aborted).toBe(true);
+      body.close();
+    });
+  });
+
+  it('reports activity on start and done for the history list', async () => {
+    const seen: ConversationActivity[] = [];
+    store.activity.subscribe((a) => seen.push(a));
+    fake.events(
+      { type: 'start', conversationId: 'c-new' },
+      { type: 'delta', text: 'ok' },
+      { type: 'done', modelId: MODEL, conversationId: 'c-new', citations: [] },
+    );
+    store.send('  When is rent due?  ', MODEL);
+    await vi.waitFor(() => expect(store.streaming()).toBe(false));
+
+    expect(seen).toHaveLength(2);
+    for (const a of seen) {
+      expect(a).toMatchObject({
+        conversationId: 'c-new',
+        message: 'When is rent due?',
+      });
+      expect(Number.isNaN(Date.parse(a.at))).toBe(false);
+    }
   });
 });
