@@ -18,4 +18,4 @@ The caller should tell you which files changed (or include the diff). If they di
 
 ## Report format
 
-For each finding: `path:line` — severity (blocker / should-fix / nit) — what's wrong — concrete failure scenario — suggested fix. Only report issues you can point to in the code; say "no issues found" for a category rather than padding. End with an overall verdict: approve / approve with nits / request changes.
+For each finding: `path:line` — severity (critical / important / nit) — what's wrong — concrete failure scenario — suggested fix. Only report issues you can point to in the code; say "no issues found" for a category rather than padding. End with an overall verdict: approve / approve with nits / request changes.

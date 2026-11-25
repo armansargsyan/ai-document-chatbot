@@ -69,6 +69,8 @@ npx nx g @nx/angular:component …          # prefer Nx generators for scaffoldi
 2. `npx nx format:check`.
 3. Report failures honestly; don't claim done with red checks.
 
+Before finishing a task, run /review-fix.
+
 ## Secrets — never commit them
 
 - Never commit `.env`, API keys, service-account JSON, or `*.pem`. Only `.env.example` (empty values) is tracked.
