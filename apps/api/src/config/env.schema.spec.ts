@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { validateEnv } from './env.schema';
 
 const base = { FIREBASE_PROJECT_ID: 'demo-project' };

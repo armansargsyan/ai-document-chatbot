@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { AppConfigService as AppConfigServiceType } from './app-config.service';
 import { envSchema, type Env } from './env.schema';
@@ -8,16 +9,13 @@ const KEYS = Object.keys(envSchema.shape) as (keyof Env)[];
 
 /**
  * ConfigModule.forRoot runs when app-config.module is first imported, so each
- * test sets process.env and then loads the real module in isolation.
+ * test sets process.env, resets the module registry and re-imports the real module.
  */
 async function compileWith(env: Partial<Record<keyof Env, string>>) {
   for (const key of KEYS) process.env[key] = env[key] ?? '';
-  let mod!: typeof import('./app-config.module');
-  let svc!: typeof import('./app-config.service');
-  jest.isolateModules(() => {
-    mod = require('./app-config.module');
-    svc = require('./app-config.service');
-  });
+  vi.resetModules();
+  const mod = await import('./app-config.module');
+  const svc = await import('./app-config.service');
   const moduleRef = await Test.createTestingModule({
     imports: [mod.AppConfigModule],
   }).compile();

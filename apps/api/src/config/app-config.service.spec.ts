@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigService } from './app-config.service';
