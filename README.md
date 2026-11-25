@@ -38,4 +38,6 @@ Project: `ai-doc-chatbot-demo` (default in `.firebaserc`). Uses Authentication (
 - **Security rules** (`firestore.rules`, `storage.rules`) deny all direct client access. The browser only signs in with Firebase Auth; every read and write goes through the NestJS api, which uses the Firebase Admin SDK.
 - **Web config**: run `firebase apps:sdkconfig web` and copy the values into the `FIREBASE_*` entries in `.env`.
 - **Admin credentials (local)**: run `gcloud auth application-default login`, or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account key. Never commit the key.
-- **Deploy rules/indexes**: `firebase deploy --only firestore`. Add `,storage` once Storage is provisioned: it needs the Blaze plan, so link a billing account and set a budget alert first. Until then a bare `firebase deploy` fails.
+- **Deploy rules/indexes**: `firebase deploy --only firestore,storage`.
+
+The project is on the Blaze plan (Cloud Storage requires it) with a $3/month budget alert. The default bucket `ai-doc-chatbot-demo.firebasestorage.app` is in `us-central1`, inside the Cloud Storage free tier.
