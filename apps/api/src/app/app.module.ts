@@ -4,9 +4,10 @@ import { AppService } from './app.service';
 import { AppConfigModule } from '../config/app-config.module';
 import { FirebaseModule } from '../firebase/firebase.module';
 import { AuthModule } from '../auth/auth.module';
+import { LlmModule } from '../llm/llm.module';
 
 @Module({
-  imports: [AppConfigModule, FirebaseModule, AuthModule],
+  imports: [AppConfigModule, FirebaseModule, AuthModule, LlmModule],
   controllers: [AppController],
   providers: [AppService],
 })
