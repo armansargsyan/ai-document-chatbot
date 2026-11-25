@@ -121,6 +121,7 @@ describe('ChatPage', () => {
     TestBed.tick();
     httpMock.expectOne('/api/models').flush(models);
     httpMock.expectOne('/api/documents').flush({ documents });
+    httpMock.expectOne('/api/conversations').flush({ conversations: [] });
     if (conversation !== undefined) {
       const req = httpMock.expectOne((r) =>
         r.url.startsWith('/api/conversations/'),

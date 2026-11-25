@@ -1,0 +1,216 @@
+<nav
+  aria-label="Conversations"
+  class="flex min-h-0 flex-1 flex-col"
+  data-testid="conversations-nav"
+>
+  <div class="shrink-0 p-3">
+    <a
+      hlmBtn
+      variant="outline"
+      routerLink="/chat"
+      class="w-full justify-start"
+      data-testid="new-chat"
+      (click)="startNew($event)"
+    >
+      <ng-icon name="lucidePlus" aria-hidden="true" />
+      New chat
+    </a>
+  </div>
+
+  <p class="sr-only" aria-live="polite" data-testid="history-announcer">
+    {{ list.announcement() }}
+  </p>
+  @if (list.notice(); as notice) {
+  <p
+    class="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-relaxed text-destructive"
+    role="alert"
+    data-testid="history-notice"
+  >
+    {{ notice }}
+  </p>
+  }
+
+  <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
+    @if (list.initialLoading()) {
+    <ul
+      class="space-y-1 px-1 pt-2"
+      aria-busy="true"
+      aria-label="Loading conversations"
+      data-testid="history-list-loading"
+    >
+      @for (w of [80, 60, 92, 66, 50]; track $index) {
+      <li class="flex h-9 items-center px-1.5">
+        <hlm-skeleton class="h-3.5" [style.width.%]="w" />
+      </li>
+      }
+    </ul>
+    } @else if (list.loadFailed()) {
+    <div class="px-3 py-8 text-center" data-testid="history-list-error">
+      <p class="text-sm font-medium">Couldn’t load conversations</p>
+      <p class="mt-1 text-xs text-muted-foreground">
+        Check your connection and try again.
+      </p>
+      <button
+        hlmBtn
+        variant="outline"
+        size="sm"
+        class="mt-4"
+        (click)="list.reload()"
+      >
+        Try again
+      </button>
+    </div>
+    } @else if (!list.rows().length) {
+    <div class="px-3 py-10 text-center" data-testid="history-list-empty">
+      <p class="text-sm font-medium">No conversations yet</p>
+      <p
+        class="mx-auto mt-1 max-w-[14rem] text-xs leading-relaxed text-muted-foreground"
+      >
+        Ask a question and the conversation will be saved here.
+      </p>
+    </div>
+    } @else { @for (group of list.groups(); track group.key) {
+    <section
+      class="pt-3 first:pt-1"
+      [attr.aria-labelledby]="uid + '-' + group.key"
+      data-testid="history-group"
+    >
+      <h2
+        [id]="uid + '-' + group.key"
+        class="px-2.5 pb-1 text-xs font-medium text-muted-foreground"
+      >
+        {{ group.label }}
+      </h2>
+      <ul class="space-y-px">
+        @for (c of group.conversations; track c.id) { @let current =
+        list.currentId() === c.id; @let deleting = list.deletingIds().has(c.id);
+        <li
+          class="group/row relative rounded-md transition-opacity data-[deleting]:pointer-events-none data-[deleting]:opacity-50"
+          [attr.data-id]="c.id"
+          [attr.data-current]="current || null"
+          [attr.data-deleting]="deleting || null"
+          data-testid="conversation-row"
+        >
+          @if (editingId() === c.id) {
+          <div class="px-0.5 py-0.5">
+            <label class="sr-only" [for]="uid + '-rename-' + c.id"
+              >Rename “{{ c.title }}”</label
+            >
+            <input
+              #renameInput
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
+              data-testid="rename-input"
+              [id]="uid + '-rename-' + c.id"
+              [value]="c.title"
+              [attr.aria-invalid]="editError() ? 'true' : null"
+              [attr.aria-describedby]="uid + '-rename-help'"
+              (input)="onRenameInput()"
+              (keydown)="onRenameKeydown(c, $event)"
+              (blur)="onRenameBlur(c, renameInput)"
+            />
+            @if (editError(); as error) {
+            <p
+              [id]="uid + '-rename-help'"
+              class="mt-1 px-0.5 text-xs text-destructive"
+              data-testid="rename-error"
+            >
+              {{ error }}
+            </p>
+            } @else {
+            <p [id]="uid + '-rename-help'" class="sr-only">
+              Up to {{ maxTitle }} characters. Press Enter to save or Escape to
+              cancel.
+            </p>
+            }
+          </div>
+          } @else {
+          <a
+            [routerLink]="['/chat', c.id]"
+            [attr.aria-current]="current ? 'page' : null"
+            class="flex items-center gap-2 rounded-md py-2 pr-2 pl-2.5 text-sm text-foreground/80 outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+            data-testid="conversation-link"
+            (click)="select($event)"
+          >
+            <span
+              class="min-w-0 flex-1 truncate"
+              data-testid="conversation-title"
+              >{{ c.title }}</span
+            >
+            <time
+              class="w-14 shrink-0 text-right text-[0.6875rem] text-muted-foreground tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-data-[current]/row:invisible [@media(hover:none)]:invisible"
+              [attr.datetime]="c.updatedAt"
+              [title]="fullTime(c.updatedAt)"
+              >{{ relativeTime(c.updatedAt, list.now()) }}</time
+            >
+          </a>
+          <div
+            class="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 group-data-[current]/row:opacity-100 [@media(hover:none)]:opacity-100"
+          >
+            <button
+              hlmBtn
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground hover:bg-background/80 hover:text-foreground"
+              data-testid="rename-button"
+              [disabled]="deleting"
+              [attr.aria-label]="'Rename ' + c.title"
+              title="Rename"
+              (click)="startRename(c)"
+            >
+              <ng-icon name="lucidePencil" aria-hidden="true" />
+            </button>
+            <button
+              hlmBtn
+              variant="ghost"
+              size="icon-xs"
+              class="text-muted-foreground hover:bg-background/80 hover:text-destructive"
+              data-testid="delete-button"
+              [disabled]="deleting"
+              aria-haspopup="dialog"
+              [attr.aria-label]="'Delete ' + c.title"
+              title="Delete"
+              (click)="askDelete(c, $event)"
+            >
+              <ng-icon name="lucideTrash2" aria-hidden="true" />
+            </button>
+          </div>
+          }
+        </li>
+        }
+      </ul>
+    </section>
+    } }
+  </div>
+</nav>
+
+<hlm-alert-dialog
+  [state]="confirmOpen() ? 'open' : 'closed'"
+  [restoreFocus]="false"
+  (closed)="onDialogClosed()"
+>
+  <hlm-alert-dialog-content *hlmAlertDialogPortal="let ctx" size="sm">
+    <hlm-alert-dialog-header>
+      <h2 hlmAlertDialogTitle>Delete this conversation?</h2>
+      <p hlmAlertDialogDescription data-testid="history-delete-description">
+        “{{ deleteTarget()?.title }}” and all its messages will be removed. This
+        can’t be undone.
+      </p>
+    </hlm-alert-dialog-header>
+    <hlm-alert-dialog-footer>
+      <button hlmAlertDialogCancel data-testid="history-delete-cancel">
+        Cancel
+      </button>
+      <button
+        hlmAlertDialogAction
+        variant="destructive"
+        data-testid="history-delete-confirm"
+        (click)="confirmDelete()"
+      >
+        Delete
+      </button>
+    </hlm-alert-dialog-footer>
+  </hlm-alert-dialog-content>
+</hlm-alert-dialog>
