@@ -1,0 +1,68 @@
+<div class="flex min-h-dvh flex-col bg-background text-foreground">
+  <header
+    class="flex items-center justify-between gap-4 border-b border-border px-4 py-3 sm:px-6"
+  >
+    <span class="text-sm font-semibold tracking-tight"
+      >AI Document Chatbot</span
+    >
+    <div class="flex items-center gap-3">
+      @if (me.hasValue()) { @if (picture(); as src) {
+      <img
+        [src]="src"
+        alt=""
+        referrerpolicy="no-referrer"
+        class="size-8 rounded-full border border-border object-cover"
+        data-testid="avatar"
+        (error)="onAvatarError()"
+      />
+      } @else {
+      <span
+        class="flex size-8 items-center justify-center rounded-full bg-muted text-sm font-medium"
+        data-testid="avatar"
+        aria-hidden="true"
+        >{{ initial() }}</span
+      >
+      }
+      <span class="hidden text-sm sm:inline" data-testid="user-name"
+        >{{ displayName() }}</span
+      >
+      }
+      <button
+        hlmBtn
+        variant="outline"
+        size="sm"
+        [disabled]="signingOut()"
+        (click)="signOut()"
+      >
+        Sign out
+      </button>
+    </div>
+  </header>
+  @if (signOutError()) {
+  <p
+    class="border-b border-border bg-muted px-4 py-2 text-center text-sm text-destructive sm:px-6"
+    role="alert"
+  >
+    Couldn’t sign you out. Try again.
+  </p>
+  }
+
+  <main class="flex flex-1 items-center justify-center px-6 py-16">
+    <div class="max-w-md text-center">
+      @if (me.isLoading()) {
+      <p class="text-sm text-muted-foreground">Loading your account…</p>
+      } @else if (me.error()) {
+      <p class="text-sm text-destructive" role="alert">
+        Couldn’t load your account. Reload the page to try again.
+      </p>
+      } @else {
+      <h1 class="text-2xl font-semibold tracking-tight">
+        Welcome, {{ displayName() }}
+      </h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Document upload and chat are coming next.
+      </p>
+      }
+    </div>
+  </main>
+</div>

@@ -10,6 +10,7 @@ import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ChatModule } from '../chat/chat.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { ClientConfigModule } from '../client-config/client-config.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ConversationsModule } from '../conversations/conversations.module';
     DocumentsModule,
     ChatModule,
     ConversationsModule,
+    ClientConfigModule,
   ],
   controllers: [AppController],
   providers: [AppService],

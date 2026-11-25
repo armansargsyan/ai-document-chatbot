@@ -29,6 +29,11 @@ export const envSchema = z
 
     FIREBASE_PROJECT_ID: z.string({ error: 'is required' }),
     FIREBASE_STORAGE_BUCKET: z.string().optional(),
+    // Public web-app config (served to the browser by GET /api/config).
+    FIREBASE_API_KEY: z.string().optional(),
+    FIREBASE_AUTH_DOMAIN: z.string().optional(),
+    FIREBASE_APP_ID: z.string().optional(),
+    FIREBASE_MESSAGING_SENDER_ID: z.string().optional(),
     GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
     FIREBASE_CLIENT_EMAIL: z
       .email({ error: 'must be a service-account email' })

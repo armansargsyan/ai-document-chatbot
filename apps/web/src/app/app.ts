@@ -1,21 +1,36 @@
-import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
-import { httpResource } from '@angular/common/http';
-import { RouterOutlet } from '@angular/router';
-import type { HealthResponse } from '@ai-document-chatbot/shared';
-import { HlmButtonImports } from '@spartan-ng/helm/button';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  effect,
+  inject,
+} from '@angular/core';
+import { Router, RouterOutlet } from '@angular/router';
+import { AuthService } from './core/auth/auth.service';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, HlmButtonImports],
+  imports: [RouterOutlet],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  protected readonly health = httpResource<HealthResponse>(() => '/api/health');
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
-  protected readonly apiStatus = computed(() => {
-    if (this.health.isLoading()) return 'checking…';
-    if (this.health.error()) return 'unreachable';
-    return this.health.value()?.status ?? 'unknown';
-  });
+  constructor() {
+    // The single owner of the "session ended" redirect: guards only run on
+    // navigation, so this covers sign-out here or in another tab and revoked
+    // tokens. No returnUrl: the next person to sign in on this device must not
+    // land on the previous user's page.
+    let wasSignedIn = false;
+    effect(() => {
+      const signedIn = this.auth.isSignedIn();
+      if (wasSignedIn && !signedIn) this.redirectToLogin();
+      wasSignedIn = signedIn;
+    });
+  }
+
+  private redirectToLogin(): void {
+    void this.router.navigate(['/login']);
+  }
 }
