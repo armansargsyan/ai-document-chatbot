@@ -14,6 +14,7 @@ import {
   LlmRequestAbortedError,
   describeProviderError,
 } from '../llm/llm-errors';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { ChatRequestPipe } from './chat-request.schema';
 import { ChatService } from './chat.service';
 
@@ -37,6 +38,7 @@ export class ChatController {
    * retrieval failures happen before streaming and are normal HTTP errors.
    */
   @Post('stream')
+  @RateLimit('chat')
   async stream(
     @CurrentUser() user: AuthUser,
     @Body(ChatRequestPipe) request: ChatRequest,

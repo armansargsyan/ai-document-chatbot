@@ -6,6 +6,14 @@ const hostPort = z.string().regex(/^[\w.-]+:\d{1,5}$/, {
 
 const optionalSecret = z.string().optional();
 
+/** A positive request limit with a default. */
+const limit = (fallback: number) =>
+  z.coerce
+    .number({ error: 'must be a number' })
+    .int({ error: 'must be an integer' })
+    .min(1, { error: 'must be at least 1' })
+    .default(fallback);
+
 export const envSchema = z
   .object({
     PORT: z.coerce
@@ -30,6 +38,12 @@ export const envSchema = z
     FIRESTORE_EMULATOR_HOST: hostPort.optional(),
     FIREBASE_AUTH_EMULATOR_HOST: hostPort.optional(),
     FIREBASE_STORAGE_EMULATOR_HOST: hostPort.optional(),
+
+    // Per-user limits (keyed by Firebase uid).
+    RATE_LIMIT_CHAT_PER_MINUTE: limit(10),
+    RATE_LIMIT_CHAT_PER_DAY: limit(200),
+    RATE_LIMIT_UPLOADS_PER_HOUR: limit(10),
+    RATE_LIMIT_UPLOADS_PER_DAY: limit(30),
   })
   .superRefine((env, ctx) => {
     if (!!env.FIREBASE_CLIENT_EMAIL !== !!env.FIREBASE_PRIVATE_KEY) {

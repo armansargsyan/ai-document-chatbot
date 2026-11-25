@@ -8,6 +8,13 @@ export interface LlmApiKeys {
   gemini?: string;
 }
 
+export interface RateLimitConfig {
+  chatPerMinute: number;
+  chatPerDay: number;
+  uploadsPerHour: number;
+  uploadsPerDay: number;
+}
+
 export interface FirebaseConfig {
   projectId: string;
   storageBucket: string;
@@ -29,6 +36,21 @@ export class AppConfigService {
       openai: this.config.get('OPENAI_API_KEY', { infer: true }),
       anthropic: this.config.get('ANTHROPIC_API_KEY', { infer: true }),
       gemini: this.config.get('GEMINI_API_KEY', { infer: true }),
+    };
+  }
+
+  get rateLimits(): RateLimitConfig {
+    return {
+      chatPerMinute: this.config.get('RATE_LIMIT_CHAT_PER_MINUTE', {
+        infer: true,
+      }),
+      chatPerDay: this.config.get('RATE_LIMIT_CHAT_PER_DAY', { infer: true }),
+      uploadsPerHour: this.config.get('RATE_LIMIT_UPLOADS_PER_HOUR', {
+        infer: true,
+      }),
+      uploadsPerDay: this.config.get('RATE_LIMIT_UPLOADS_PER_DAY', {
+        infer: true,
+      }),
     };
   }
 

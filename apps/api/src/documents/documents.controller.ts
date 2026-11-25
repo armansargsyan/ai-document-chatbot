@@ -17,6 +17,7 @@ import {
 } from '@ai-document-chatbot/shared';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FirestoreIdPipe } from '../common/firestore-id.pipe';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import type { AuthUser } from '../auth/token-verifier';
 import { DocumentsService, type UploadedPdf } from './documents.service';
 
@@ -28,6 +29,7 @@ export class DocumentsController {
 
   /** Multipart upload with the PDF in the `file` field. Oversized files get 413. */
   @Post()
+  @RateLimit('upload')
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: MAX_PDF_BYTES, files: 1, fields: 0 },
