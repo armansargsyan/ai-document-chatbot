@@ -207,6 +207,7 @@ describe('chat stream (integration)', () => {
 
     const events = await readEvents(res);
     expect(events).toEqual([
+      { type: 'start', conversationId: CONV },
       { type: 'delta', text: 'Refunds take ' },
       { type: 'delta', text: '14 days [1].' },
       {
@@ -304,6 +305,7 @@ describe('chat stream (integration)', () => {
     };
     const events = await readEvents(await post(question));
     expect(events).toEqual([
+      { type: 'start', conversationId: NEW_CONV },
       expect.objectContaining({
         type: 'error',
         status: 502,
@@ -391,7 +393,8 @@ describe('chat stream (integration)', () => {
     const body = await res.text();
     expect(body).not.toContain('upstream secret detail');
     const events = body.split('\n\n').filter(Boolean);
-    expect(events[0]).toContain('"partial "');
+    expect(events[0]).toContain('event: start');
+    expect(events[1]).toContain('"partial "');
     expect(events.at(-1)).toContain('event: error');
     expect(events.at(-1)).toContain('"status":502');
   });

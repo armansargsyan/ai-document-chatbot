@@ -1,5 +1,6 @@
 import { Route } from '@angular/router';
 import { authGuard, guestGuard } from './core/auth/auth.guards';
+import { chatRoute } from './features/chat/chat-route';
 
 export const appRoutes: Route[] = [
   {
@@ -16,13 +17,9 @@ export const appRoutes: Route[] = [
     loadComponent: () =>
       import('./core/layout/app-shell').then((m) => m.AppShell),
     children: [
-      {
-        path: '',
-        pathMatch: 'full',
-        title: 'AI Document Chatbot',
-        loadComponent: () =>
-          import('./features/home/home-page').then((m) => m.HomePage),
-      },
+      { path: '', pathMatch: 'full', redirectTo: 'chat' },
+      // `chat` and `chat/:conversationId` (one route, so the page is reused).
+      chatRoute,
       {
         path: 'documents',
         title: 'Documents | AI Document Chatbot',

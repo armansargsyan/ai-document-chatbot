@@ -1,0 +1,82 @@
+<form
+  class="rounded-2xl border border-input bg-background shadow-xs transition-[box-shadow,border-color] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30"
+  (submit)="$event.preventDefault(); submit()"
+>
+  <label for="chat-composer-input" class="sr-only">Message</label>
+  <textarea
+    #textarea
+    hlmTextarea
+    id="chat-composer-input"
+    rows="1"
+    class="block max-h-[200px] min-h-0 resize-none border-0 bg-transparent px-4 pt-3.5 pb-1 text-[0.9375rem] leading-6 shadow-none focus-visible:ring-0 dark:bg-transparent md:text-[0.9375rem]"
+    data-testid="composer-input"
+    aria-describedby="chat-composer-hint"
+    [attr.maxlength]="maxLength"
+    [placeholder]="placeholder()"
+    [value]="text()"
+    [disabled]="disabled()"
+    [readOnly]="streaming()"
+    [attr.aria-invalid]="tooLong() || null"
+    (input)="onInput($event)"
+    (keydown)="onKeydown($event)"
+  ></textarea>
+
+  <div class="flex items-center gap-2 px-2.5 pt-1 pb-2.5">
+    <div class="min-w-0 flex-1">
+      <ng-content />
+    </div>
+
+    @if (showCounter()) {
+    <span
+      class="shrink-0 text-xs tabular-nums"
+      [class.text-destructive]="tooLong()"
+      [class.text-muted-foreground]="!tooLong()"
+      data-testid="composer-counter"
+      >{{ length() }} / {{ maxLength }}</span
+    >
+    } @if (streaming()) {
+    <button
+      hlmBtn
+      type="button"
+      size="sm"
+      variant="outline"
+      class="shrink-0 gap-1.5 rounded-full"
+      data-testid="composer-stop"
+      (click)="stop.emit()"
+    >
+      <svg class="size-3" viewBox="0 0 12 12" aria-hidden="true">
+        <rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor" />
+      </svg>
+      Stop
+    </button>
+    } @else {
+    <button
+      hlmBtn
+      type="submit"
+      size="icon-sm"
+      class="shrink-0 rounded-full"
+      aria-label="Send message"
+      title="Send (Enter)"
+      data-testid="composer-send"
+      [disabled]="!canSend()"
+    >
+      <svg class="size-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M12 19V5M5.5 11.5 12 5l6.5 6.5"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </button>
+    }
+  </div>
+</form>
+<p
+  id="chat-composer-hint"
+  class="mt-2 hidden text-center text-xs text-muted-foreground sm:block"
+>
+  Enter to send, Shift+Enter for a new line. Answers can be wrong; check the
+  cited pages.
+</p>

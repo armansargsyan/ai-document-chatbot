@@ -20,7 +20,12 @@
       "@spartan-ng/helm/badge": ["./libs/ui/badge/src/index.ts"],
       "@spartan-ng/helm/skeleton": ["./libs/ui/skeleton/src/index.ts"],
       "@spartan-ng/helm/alert-dialog": ["./libs/ui/alert-dialog/src/index.ts"],
-      "@spartan-ng/helm/progress": ["./libs/ui/progress/src/index.ts"]
+      "@spartan-ng/helm/progress": ["./libs/ui/progress/src/index.ts"],
+      "@spartan-ng/helm/native-select": [
+        "./libs/ui/native-select/src/index.ts"
+      ],
+      "@spartan-ng/helm/sheet": ["./libs/ui/sheet/src/index.ts"],
+      "@spartan-ng/helm/textarea": ["./libs/ui/textarea/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]
