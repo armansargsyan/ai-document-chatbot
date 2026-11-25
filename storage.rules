@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Uploads and downloads go through the NestJS api (Firebase Admin SDK bypasses these rules).
+// Clients get no direct access.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -30,3 +30,16 @@ npx nx graph           # project graph
 ```
 
 Add spartan/ui primitives with `npx nx g @spartan-ng/cli:ui <name>`.
+
+## Firebase
+
+Project: `ai-doc-chatbot-demo` (default in `.firebaserc`). Uses Authentication (Google sign-in), Cloud Firestore (`nam5`, native mode) and Cloud Storage.
+
+- **Security rules** (`firestore.rules`, `storage.rules`) deny all direct client access. The browser only signs in with Firebase Auth; every read and write goes through the NestJS api, which uses the Firebase Admin SDK.
+- **Web config**: run `firebase apps:sdkconfig web` and copy the values into the `FIREBASE_*` entries in `.env`.
+- **Admin credentials (local)**: run `gcloud auth application-default login`, or point `GOOGLE_APPLICATION_CREDENTIALS` at a service-account key. Never commit the key.
+  With `gcloud` user credentials, also run `gcloud auth application-default set-quota-project ai-doc-chatbot-demo` so quota and billing go to this project. User credentials carry no project ID, so the api must pass `FIREBASE_PROJECT_ID` to the Admin SDK explicitly (planned in #3).
+- **Emulators**: `firebase emulators:start` runs Auth (9099), Firestore (8080) and Storage (9199) locally with the Emulator UI on http://localhost:4000. Requires Java 11+. To point the api at them, set `FIRESTORE_EMULATOR_HOST`, `FIREBASE_AUTH_EMULATOR_HOST` and `FIREBASE_STORAGE_EMULATOR_HOST` in `.env` (values in `.env.example`); without them the api talks to the live project.
+- **Deploy rules/indexes**: `firebase deploy --only firestore,storage`.
+
+The project is on the Blaze plan (Cloud Storage requires it) with a $3/month budget alert. The default bucket `ai-doc-chatbot-demo.firebasestorage.app` is in `us-central1`, inside the Cloud Storage free tier.
