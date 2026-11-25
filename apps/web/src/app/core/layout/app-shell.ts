@@ -14,8 +14,8 @@ import { AppLogo } from './app-logo';
 
 /**
  * Layout for every signed-in page: header (brand, nav, account, sign-out) and
- * a router outlet for the feature. Chat (#11) and its history sidebar (#12)
- * plug in as more child routes / an aside next to the outlet.
+ * a router outlet for the feature. The chat history sidebar (#12) is an
+ * aside inside the chat page.
  */
 @Component({
   selector: 'app-shell',
@@ -33,7 +33,7 @@ export class AppShell {
   private readonly auth = inject(AuthService);
 
   protected readonly nav = [
-    { path: '/', label: 'Home', exact: true },
+    { path: '/chat', label: 'Chat', exact: false },
     { path: '/documents', label: 'Documents', exact: false },
   ] as const;
 

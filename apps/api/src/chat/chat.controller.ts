@@ -65,6 +65,7 @@ export class ChatController {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    writeEvent(res, { type: 'start', conversationId: prepared.conversationId });
 
     try {
       let answer = '';

@@ -36,7 +36,8 @@ describe('AppShell', () => {
       providers: [
         { provide: AuthClient, useValue: client },
         provideRouter([
-          { path: '', component: ChildPage },
+          { path: 'chat', component: ChildPage },
+          { path: 'chat/:id', component: ChildPage },
           { path: 'documents', component: ChildPage },
         ]),
         provideHttpClient(),
@@ -79,10 +80,15 @@ describe('AppShell', () => {
     const { el, fixture } = await render();
     const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a')];
     expect(links.map((a) => a.textContent?.trim())).toEqual([
-      'Home',
+      'Chat',
       'Documents',
     ]);
+    expect(links[0].getAttribute('href')).toBe('/chat');
     expect(links[1].getAttribute('href')).toBe('/documents');
+
+    await TestBed.inject(Router).navigateByUrl('/chat/c1');
+    await fixture.whenStable();
+    expect(links[0].getAttribute('aria-current')).toBe('page');
 
     await TestBed.inject(Router).navigateByUrl('/documents');
     await fixture.whenStable();

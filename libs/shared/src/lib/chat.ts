@@ -22,10 +22,15 @@ export interface Citation {
 
 /**
  * Server-sent events of `POST /api/chat/stream`. Each SSE message has
- * `event: <type>` and `data: <JSON of the event>`. A stream ends with exactly
- * one `done` or `error` event.
+ * `event: <type>` and `data: <JSON of the event>`. A stream starts with one
+ * `start` event and ends with exactly one `done` or `error` event.
  */
 export type ChatStreamEvent =
+  /**
+   * First event: the conversation this turn is saved to (created now if none
+   * was given). Lets a client that stops early keep using that conversation.
+   */
+  | { type: 'start'; conversationId: string }
   | { type: 'delta'; text: string }
   | {
       type: 'done';
