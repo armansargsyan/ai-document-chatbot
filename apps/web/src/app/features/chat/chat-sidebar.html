@@ -101,7 +101,7 @@
               type="text"
               autocomplete="off"
               spellcheck="false"
-              class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
+              class="h-8 w-full rounded-md border border-input bg-background px-2 text-sm pointer-coarse:h-10 shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
               data-testid="rename-input"
               [id]="uid + '-rename-' + c.id"
               [value]="c.title"
@@ -130,7 +130,7 @@
           <a
             [routerLink]="['/chat', c.id]"
             [attr.aria-current]="current ? 'page' : null"
-            class="flex items-center gap-2 rounded-md py-2 pr-2 pl-2.5 text-sm text-foreground/80 outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+            class="flex items-center gap-2 rounded-md py-2 pr-2 pl-2.5 text-sm text-foreground/80 outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground pointer-coarse:py-3"
             data-testid="conversation-link"
             (click)="select($event)"
           >
@@ -140,7 +140,7 @@
               >{{ c.title }}</span
             >
             <time
-              class="w-14 shrink-0 text-right text-[0.6875rem] text-muted-foreground tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-data-[current]/row:invisible [@media(hover:none)]:invisible"
+              class="w-14 shrink-0 pointer-coarse:w-20 text-right text-[0.6875rem] text-muted-foreground tabular-nums group-focus-within/row:invisible group-hover/row:invisible group-data-[current]/row:invisible [@media(hover:none)]:invisible"
               [attr.datetime]="c.updatedAt"
               [title]="fullTime(c.updatedAt)"
               >{{ relativeTime(c.updatedAt, list.now()) }}</time
@@ -153,7 +153,7 @@
               hlmBtn
               variant="ghost"
               size="icon-xs"
-              class="text-muted-foreground hover:bg-background/80 hover:text-foreground"
+              class="text-muted-foreground hover:bg-background/80 hover:text-foreground pointer-coarse:size-10"
               data-testid="rename-button"
               [disabled]="deleting"
               [attr.aria-label]="'Rename ' + c.title"
@@ -166,7 +166,7 @@
               hlmBtn
               variant="ghost"
               size="icon-xs"
-              class="text-muted-foreground hover:bg-background/80 hover:text-destructive"
+              class="text-muted-foreground hover:bg-background/80 hover:text-destructive pointer-coarse:size-10"
               data-testid="delete-button"
               [disabled]="deleting"
               aria-haspopup="dialog"

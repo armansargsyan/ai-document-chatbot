@@ -2,12 +2,11 @@
   <header
     class="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70"
   >
-    <div
-      class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:gap-6 sm:px-6"
-    >
+    <!-- Full width, so the brand lines up with the chat history aside. -->
+    <div class="flex h-14 items-center gap-3 px-4 sm:gap-6 sm:px-6">
       <a
         routerLink="/chat"
-        class="flex items-center gap-2 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        class="-m-2 flex items-center gap-2 rounded-md p-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         aria-label="AI Document Chatbot, new chat"
       >
         <app-logo class="size-6" />
@@ -20,10 +19,10 @@
         @for (item of nav; track item.path) {
         <a
           [routerLink]="item.path"
-          routerLinkActive="bg-muted text-foreground"
+          routerLinkActive
           [routerLinkActiveOptions]="{ exact: item.exact }"
           ariaCurrentWhenActive="page"
-          class="rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          class="rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-muted aria-[current=page]:text-foreground pointer-coarse:py-2.5"
           >{{ item.label }}</a
         >
         }

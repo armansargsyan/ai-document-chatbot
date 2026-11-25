@@ -32,10 +32,14 @@
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
+  /* Darker than the zinc default (0.552) so muted text passes WCAG AA (4.5:1)
+     on bg-muted too, e.g. citation numbers and the active nav pill. */
+  --muted-foreground: oklch(0.52 0.016 285.938);
   --accent: oklch(0.967 0.001 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
+  /* Darker than the default (0.577) so destructive text passes AA on its own
+     tint (bg-destructive/10: badges, alert-dialog actions, inline errors). */
+  --destructive: oklch(0.53 0.23 27.325);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -91,5 +95,19 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Respect reduced motion everywhere, including overlay (tw-animate), skeleton
+   and transition animations. Near-zero, not none: overlays wait for
+   animationend before they detach. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

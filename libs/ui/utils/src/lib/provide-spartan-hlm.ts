@@ -27,6 +27,9 @@ import {
  * };
  * ```
  */
+// NOTE: apps/web/src/app/app.config.ts inlines this provider (to keep this
+// barrel out of the initial bundle). If a spartan update adds providers here,
+// mirror them there.
 export function provideSpartanHlm(): EnvironmentProviders {
   return makeEnvironmentProviders([
     {
