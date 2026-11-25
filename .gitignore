@@ -64,3 +64,6 @@ firebase-adminsdk*.json
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# Playwright MCP output
+.playwright-mcp/
