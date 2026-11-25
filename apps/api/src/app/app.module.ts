@@ -7,6 +7,7 @@ import { AuthModule } from '../auth/auth.module';
 import { LlmModule } from '../llm/llm.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { ChatModule } from '../chat/chat.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DocumentsModule } from '../documents/documents.module';
     LlmModule,
     EmbeddingsModule,
     DocumentsModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
