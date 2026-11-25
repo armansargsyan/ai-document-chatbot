@@ -8,6 +8,7 @@ import { LlmModule } from '../llm/llm.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ChatModule } from '../chat/chat.module';
+import { ConversationsModule } from '../conversations/conversations.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ChatModule } from '../chat/chat.module';
     EmbeddingsModule,
     DocumentsModule,
     ChatModule,
+    ConversationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

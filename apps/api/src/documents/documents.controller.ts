@@ -4,12 +4,10 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  NotFoundException,
   Param,
   Post,
   UploadedFile,
   UseInterceptors,
-  type PipeTransform,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -18,17 +16,11 @@ import {
   type ListDocumentsResponse,
 } from '@ai-document-chatbot/shared';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { FirestoreIdPipe } from '../common/firestore-id.pipe';
 import type { AuthUser } from '../auth/token-verifier';
 import { DocumentsService, type UploadedPdf } from './documents.service';
 
-/** Firestore auto-IDs are 20 alphanumerics; anything else cannot exist. */
-class DocumentIdPipe implements PipeTransform<string, string> {
-  transform(value: string): string {
-    if (!/^[A-Za-z0-9]{20}$/.test(value))
-      throw new NotFoundException('Document not found');
-    return value;
-  }
-}
+const DocumentId = new FirestoreIdPipe('Document not found');
 
 @Controller('documents')
 export class DocumentsController {
@@ -57,7 +49,7 @@ export class DocumentsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @CurrentUser() user: AuthUser,
-    @Param('id', DocumentIdPipe) id: string,
+    @Param('id', DocumentId) id: string,
   ): Promise<void> {
     return this.documents.remove(user.uid, id);
   }

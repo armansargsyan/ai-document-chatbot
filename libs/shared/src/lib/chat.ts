@@ -30,8 +30,18 @@ export type ChatStreamEvent =
   | {
       type: 'done';
       modelId: LlmModelId;
-      conversationId: string | null;
+      /** The conversation this turn was saved to (newly created if none was given). */
+      conversationId: string;
       /** Sources given to the model, numbered as referenced in the answer. */
       citations: Citation[];
     }
-  | { type: 'error'; status: number; message: string };
+  | {
+      type: 'error';
+      status: number;
+      message: string;
+      /**
+       * Set when the turn was already saved to a conversation (e.g. a new one),
+       * so a retry continues it instead of creating a duplicate.
+       */
+      conversationId?: string;
+    };
