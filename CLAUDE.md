@@ -53,6 +53,7 @@ npx nx g @nx/angular:component …          # prefer Nx generators for scaffoldi
 
 - One feature module per domain (`apps/api/src/<feature>/{*.module,*.controller,*.service}.ts`). Controllers stay thin; logic lives in services.
 - Request/response shapes are defined in `libs/shared` and used as controller return types.
+- Every route requires a Firebase ID token (`Authorization: Bearer …`) via the global `FirebaseAuthGuard`. Opt out with `@Public()`; read the caller with `@CurrentUser()`. Scope all data access to that user's `uid`.
 - Validate all input at the boundary (DTO + validation pipe). Never trust client data.
 - Config/secrets only via `process.env` through a config module — never hard-code keys, never log them, never return them in responses.
 - LLM provider calls go behind an injectable service interface so providers are swappable and mockable in tests.
