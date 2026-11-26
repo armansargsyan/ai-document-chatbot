@@ -1,4 +1,7 @@
 import type OpenAI from 'openai';
+import { limitError } from '../common/limit-errors';
+import { isQuotaExhausted } from '../llm/llm-errors';
+import type { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
 
 export const EMBEDDING_MODEL = 'text-embedding-3-small';
 export const EMBEDDING_DIMENSIONS = 1536;
@@ -46,5 +49,36 @@ export class OpenAiEmbedder extends Embedder {
       vectors.push(...ordered.map((item) => item.embedding));
     }
     return vectors;
+  }
+}
+
+/**
+ * Wraps the OpenAI embedder: fails fast with 503 `search_quota_exhausted`
+ * while OpenAI is known to be out of budget, and recognizes (and remembers)
+ * quota exhaustion on a failed call. Other errors pass through unchanged.
+ */
+export class QuotaTrackingEmbedder extends Embedder {
+  constructor(
+    private readonly inner: Embedder,
+    private readonly quota: ProviderQuotaTracker,
+  ) {
+    super();
+  }
+
+  get dimensions(): number {
+    return this.inner.dimensions;
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    if (this.quota.searchExhausted) throw limitError('search_quota_exhausted');
+    try {
+      return await this.inner.embed(texts);
+    } catch (error) {
+      if (isQuotaExhausted('openai', error)) {
+        this.quota.markExhausted('openai');
+        throw limitError('search_quota_exhausted');
+      }
+      throw error;
+    }
   }
 }

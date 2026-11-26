@@ -23,12 +23,12 @@ describe('LLM model allow-list', () => {
   });
 
   it('recognises only allow-listed ids', () => {
-    expect(isLlmModelId('gemini-4-argon')).toBe(true);
+    expect(isLlmModelId('gemini-3.8-flash')).toBe(true);
     expect(isLlmModelId('gpt-4')).toBe(false);
     expect(isLlmModelId(undefined)).toBe(false);
   });
 
   it('looks up a model by id', () => {
-    expect(getLlmModel('claude-sonnet-5-5').provider).toBe('anthropic');
+    expect(getLlmModel('claude-haiku-5-5').provider).toBe('anthropic');
   });
 });

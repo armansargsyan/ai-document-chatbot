@@ -73,15 +73,17 @@ export class ChatApi {
         // Not JSON (a proxy page, say): fall back to generic copy.
       }
       const status = response.ok ? 500 : response.status;
+      const code = serverCode(body);
       throw new ChatError(
         status,
         chatErrorMessage(
           status,
           serverMessage(body),
           retryAfterSeconds(response),
+          code,
         ),
         undefined,
-        serverCode(body),
+        code,
       );
     }
 
@@ -113,8 +115,14 @@ export class ChatApi {
           if (event.type === 'error') {
             throw new ChatError(
               event.status,
-              chatErrorMessage(event.status, event.message || null),
+              chatErrorMessage(
+                event.status,
+                event.message || null,
+                null,
+                event.code,
+              ),
               event.conversationId,
+              event.code,
             );
           }
           yield event;

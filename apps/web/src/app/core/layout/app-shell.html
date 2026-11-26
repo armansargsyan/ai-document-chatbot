@@ -28,7 +28,19 @@
         }
       </nav>
 
-      <div class="ml-auto flex items-center gap-3">
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <button
+          hlmBtn
+          variant="ghost"
+          size="icon-sm"
+          class="text-muted-foreground"
+          popovertarget="about-demo"
+          aria-label="About this demo"
+          title="About this demo"
+          data-testid="about-toggle"
+        >
+          <ng-icon name="lucideInfo" aria-hidden="true" />
+        </button>
         @if (me.hasValue()) { @if (picture(); as src) {
         <img
           [src]="src"
@@ -64,6 +76,22 @@
       </div>
     </div>
   </header>
+  <!-- Native popover: light dismiss, Escape and focus return for free. -->
+  <div
+    id="about-demo"
+    popover
+    role="dialog"
+    class="inset-auto top-16 right-4 m-0 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg"
+    aria-labelledby="about-demo-title"
+    data-testid="about-demo"
+  >
+    <h2 id="about-demo-title" class="text-sm font-semibold">About this demo</h2>
+    <p class="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+      {{ demoRules }} Deleting a document frees a slot but doesn’t give back an
+      upload.
+    </p>
+    <app-owner-contact class="mt-3 border-t border-border pt-3" />
+  </div>
   @if (signOutError()) {
   <p
     class="border-b border-border bg-muted px-4 py-2 text-center text-sm text-destructive sm:px-6"

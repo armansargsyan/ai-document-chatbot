@@ -27,7 +27,8 @@ describe('formatBytes', () => {
     [812, '812 B'],
     [340 * 1024, '340 KB'],
     [2.4 * 1024 * 1024, '2.4 MB'],
-    [MAX_PDF_BYTES, '10 MB'],
+    [MAX_PDF_BYTES, '3 MB'],
+    [2 * 1024 * 1024, '2 MB'],
   ])('%d → %s', (bytes, label) => {
     expect(formatBytes(bytes)).toBe(label);
   });
@@ -52,10 +53,10 @@ describe('validatePdf', () => {
   it('rejects files over the limit and empty files', () => {
     expect(validatePdf(file('a.pdf', MAX_PDF_BYTES))).toBeNull();
     expect(validatePdf(file('big.pdf', MAX_PDF_BYTES + 1))).toBe(
-      'This file is larger than 10 MB, the upload limit.',
+      'This file is larger than 3 MB, the upload limit.',
     );
     expect(validatePdf(file('huge.pdf', 25 * 1024 * 1024))).toContain(
-      'larger than 10 MB',
+      'larger than 3 MB',
     );
     expect(validatePdf(file('empty.pdf', 0))).toBe('This file is empty.');
   });

@@ -15,9 +15,11 @@ import {
   type ConversationDetail,
   type LlmModelId,
 } from '@ai-document-chatbot/shared';
+import { DemoUsage } from '../../core/usage/demo-usage';
 import { ChatApi } from './chat-api';
 import { ChatDocuments, type DocumentScope } from './chat-documents';
 import { CHAT_SERVER_MESSAGE, ChatError } from './chat-errors';
+import { ChatModels } from './chat-models';
 
 export type ChatEntryStatus =
   /** Sent, no text yet (typing indicator). */
@@ -91,6 +93,8 @@ export class ChatStore {
   private readonly api = inject(ChatApi);
   private readonly router = inject(Router);
   private readonly documents = inject(ChatDocuments);
+  private readonly models = inject(ChatModels);
+  private readonly usage = inject(DemoUsage);
 
   /** Conversation whose history is loaded from the api (not one created here). */
   private readonly historyId = signal<string | undefined>(undefined);
@@ -327,6 +331,16 @@ export class ChatStore {
           : new ChatError(500, CHAT_SERVER_MESSAGE);
       const { code } = chatError;
       let text = chatError.message;
+      if (code === 'model_quota_exhausted') {
+        // The switcher then shows that model as unavailable and falls back
+        // to another one, which Retry uses.
+        this.models.reload();
+      } else if (
+        code === 'question_limit_reached' ||
+        code === 'search_quota_exhausted'
+      ) {
+        this.usage.noteLimit(code);
+      }
       if (code === 'document_not_found' || code === 'document_not_ready') {
         // Refresh the picker so a gone document falls back to "All
         // documents". The conversation is still fine.
@@ -357,6 +371,8 @@ export class ChatStore {
         this.controller = null;
         this.activeId.set(null);
       }
+      // A question was (probably) counted, even if it failed or was stopped.
+      this.usage.refresh();
     }
   }
 

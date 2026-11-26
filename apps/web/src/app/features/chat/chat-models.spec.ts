@@ -27,11 +27,13 @@ const withAvailability = (
 
 describe('pickDefaultModel', () => {
   it('prefers the saved model while it is available', () => {
-    expect(pickDefaultModel(MODELS, 'gpt-6.2-astra')).toBe('gpt-6.2-astra');
+    expect(pickDefaultModel(MODELS, 'gpt-6-luna')).toBe('gpt-6-luna');
   });
 
   it('ignores a saved model that is unavailable or unknown', () => {
-    expect(pickDefaultModel(MODELS, 'gemini-4-argon')).toBe('claude-haiku-5-5');
+    expect(pickDefaultModel(MODELS, 'gemini-3.8-flash')).toBe(
+      'claude-haiku-5-5',
+    );
     expect(pickDefaultModel(MODELS, 'retired-model')).toBe('claude-haiku-5-5');
   });
 
@@ -41,15 +43,15 @@ describe('pickDefaultModel', () => {
 
   it('falls back to the first available model when the default is unavailable', () => {
     const response = withAvailability({ 'claude-haiku-5-5': false });
-    expect(pickDefaultModel(response, null)).toBe('gpt-6.2-astra');
+    expect(pickDefaultModel(response, null)).toBe('gpt-6-luna');
   });
 
   it('returns null when no model is available', () => {
     const response = withAvailability({
-      'gpt-6.2-astra': false,
+      'gpt-6-luna': false,
       'claude-haiku-5-5': false,
     });
-    expect(pickDefaultModel(response, 'gpt-6.2-astra')).toBeNull();
+    expect(pickDefaultModel(response, 'gpt-6-luna')).toBeNull();
   });
 });
 
@@ -90,17 +92,17 @@ describe('ChatModels', () => {
     expect(
       models.groups().map((g) => [g.label, g.models.map((m) => m.id)]),
     ).toEqual([
-      ['OpenAI', ['gpt-6.2-astra']],
+      ['OpenAI', ['gpt-6-luna']],
       ['Claude', ['claude-haiku-5-5']],
-      ['Gemini', ['gemini-4-argon']],
+      ['Gemini', ['gemini-3.8-flash']],
     ]);
     expect(models.someUnavailable()).toBe(true);
   });
 
   it('restores the saved choice and remembers a new one', async () => {
-    storage.setItem(MODEL_STORAGE_KEY, 'gpt-6.2-astra');
+    storage.setItem(MODEL_STORAGE_KEY, 'gpt-6-luna');
     await load();
-    expect(models.selectedId()).toBe('gpt-6.2-astra');
+    expect(models.selectedId()).toBe('gpt-6-luna');
 
     models.select('claude-haiku-5-5');
     expect(models.selectedId()).toBe('claude-haiku-5-5');
@@ -109,7 +111,7 @@ describe('ChatModels', () => {
 
   it('refuses to select an unavailable or unknown model', async () => {
     await load();
-    models.select('gemini-4-argon');
+    models.select('gemini-3.8-flash');
     models.select('nope');
     expect(models.selectedId()).toBe('claude-haiku-5-5');
     expect(storage.getItem(MODEL_STORAGE_KEY)).toBeNull();
@@ -117,7 +119,7 @@ describe('ChatModels', () => {
 
   it('reports when no model is available', async () => {
     await load(
-      withAvailability({ 'gpt-6.2-astra': false, 'claude-haiku-5-5': false }),
+      withAvailability({ 'gpt-6-luna': false, 'claude-haiku-5-5': false }),
     );
     expect(models.noneAvailable()).toBe(true);
     expect(models.selectedId()).toBeNull();
@@ -130,8 +132,8 @@ describe('ChatModels', () => {
     storage.setItem = storage.getItem;
     await load();
     expect(models.selectedId()).toBe('claude-haiku-5-5');
-    models.select('gpt-6.2-astra');
-    expect(models.selectedId()).toBe('gpt-6.2-astra');
+    models.select('gpt-6-luna');
+    expect(models.selectedId()).toBe('gpt-6-luna');
   });
 
   it('reports a failed load and nothing selected', async () => {

@@ -7,7 +7,10 @@ import {
 import type {
   DocumentSummary,
   ListDocumentsResponse,
+  UsageResponse,
 } from '@ai-document-chatbot/shared';
+import { DemoUsage, USAGE_URL } from '../../core/usage/demo-usage';
+import { FRESH_USAGE, usageOf } from '../../core/usage/testing/usage-fixtures';
 import { DOCUMENTS_POLL_MS, DocumentsPage } from './documents-page';
 
 /** Long enough never to fire on its own; polling tests fake `setInterval`. */
@@ -61,14 +64,19 @@ describe('DocumentsPage', () => {
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
+        DemoUsage,
         { provide: DOCUMENTS_POLL_MS, useValue: POLL_MS },
       ],
     });
     httpMock = TestBed.inject(HttpTestingController);
+    currentUsage = FRESH_USAGE;
+    usageRequests = 0;
   });
 
   afterEach(() => {
     fixture?.destroy();
+    // Usage refreshes are asserted where they matter.
+    httpMock.match(USAGE_URL);
     httpMock.verify();
   });
 
@@ -79,6 +87,19 @@ describe('DocumentsPage', () => {
   ];
   const overlay = (id: string) =>
     document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+  /** What `/api/usage` answers; set it before a refresh to change the counts. */
+  let currentUsage: UsageResponse;
+  let usageRequests: number;
+
+  /** Answers pending usage requests (a pending one keeps the app unstable). */
+  function flushUsage() {
+    TestBed.tick();
+    for (const req of httpMock.match(USAGE_URL)) {
+      usageRequests++;
+      req.flush(currentUsage);
+    }
+  }
 
   async function expectList(
     response: ListDocumentsResponse | 'error' = list(READY),
@@ -91,10 +112,24 @@ describe('DocumentsPage', () => {
     } else {
       req.flush(response);
     }
+    flushUsage();
     await fixture.whenStable();
   }
 
-  async function render(response?: ListDocumentsResponse | 'error') {
+  /** Expects one usage refresh and answers it with `usage`. */
+  async function expectUsage(usage: UsageResponse) {
+    currentUsage = usage;
+    const before = usageRequests;
+    flushUsage();
+    expect(usageRequests).toBe(before + 1);
+    await fixture.whenStable();
+  }
+
+  async function render(
+    response?: ListDocumentsResponse | 'error',
+    usage: UsageResponse = FRESH_USAGE,
+  ) {
+    currentUsage = usage;
     fixture = TestBed.createComponent(DocumentsPage);
     el = fixture.nativeElement as HTMLElement;
     TestBed.tick();
@@ -232,13 +267,53 @@ describe('DocumentsPage', () => {
       expect(rows()[0].hasAttribute('data-deleting')).toBe(true);
 
       req.flush(null, { status: 204, statusText: 'No Content' });
+      // A slot is free: the usage is refreshed too.
+      flushUsage();
       await fixture.whenStable();
+      expect(usageRequests).toBe(2);
       expect(rows()).toHaveLength(1);
       expect(rows()[0].textContent).toContain('Scan.pdf');
       expect(q('list-announcer')?.textContent).toContain(
         'Deleted “Lease agreement.pdf”',
       );
       expect(document.activeElement?.id).toBe('documents-heading');
+    });
+
+    it('warns that a delete won’t free an upload once all are used', async () => {
+      await render(list(READY), usageOf({ documents: 1, uploads: 6 }));
+      await openConfirm(rows()[0]);
+      const warning = overlay('delete-upload-warning');
+      expect(warning?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+        'You’ve used all 6 demo uploads. If you delete this document, you won’t be able to upload another.',
+      );
+      // Part of the description, so it's read with the dialog.
+      expect(overlay('delete-description')?.contains(warning)).toBe(true);
+      expect(overlay('delete-uploads-left')).toBeNull();
+    });
+
+    it('shows the uploads left when some remain', async () => {
+      await render(list(READY), usageOf({ documents: 1, uploads: 4 }));
+      await openConfirm(rows()[0]);
+      expect(overlay('delete-upload-warning')).toBeNull();
+      expect(overlay('delete-uploads-left')?.textContent).toContain(
+        'Uploads left: 2 of 6',
+      );
+    });
+
+    it('refreshes the usage after a delete', async () => {
+      await render(list(READY), usageOf({ documents: 3, uploads: 3 }));
+      expect(q('upload-blocked-title')?.textContent).toContain(
+        'Delete a document to upload another',
+      );
+      await openConfirm(rows()[0]);
+      overlay('delete-confirm')?.click();
+      await fixture.whenStable();
+      httpMock
+        .expectOne('/api/documents/d1')
+        .flush(null, { status: 204, statusText: 'No Content' });
+      await expectUsage(usageOf({ documents: 2, uploads: 3 }));
+      expect(q('upload-blocked')).toBeNull();
+      expect(q('drop-zone')).not.toBeNull();
     });
 
     it('does nothing when cancelled', async () => {
@@ -302,6 +377,7 @@ describe('DocumentsPage', () => {
           { statusCode: 404, message: 'Document not found' },
           { status: 404, statusText: 'Not Found' },
         );
+      flushUsage();
       await fixture.whenStable();
       expect(rows()).toHaveLength(0);
       expect(q('list-empty')).not.toBeNull();
@@ -336,8 +412,56 @@ describe('DocumentsPage', () => {
     httpMock
       .expectOne({ method: 'POST', url: '/api/documents' })
       .flush(doc({ id: 'n1', name: 'new.pdf' }));
-    // The upload triggered a refresh, which stays pending until flushed.
+    // The upload triggered a refresh of the list and of the usage counts,
+    // which stay pending until flushed.
+    currentUsage = usageOf({ documents: 2, uploads: 2, questions: 2 });
     await expectList(list(doc({ id: 'n1', name: 'new.pdf' })));
     expect(rows()[0].textContent).toContain('new.pdf');
+    expect(usageRequests).toBe(2);
+    expect(q('demo-usage')?.getAttribute('aria-label')).toBe(
+      'Demo usage: 2 of 3 documents · 2 of 6 uploads · 2 of 30 questions',
+    );
+  });
+
+  describe('demo usage', () => {
+    const blockedTitle = () =>
+      q('upload-blocked-title')?.textContent?.trim() ?? null;
+
+    it('shows usage and the rules next to the upload area', async () => {
+      await render(
+        list(READY),
+        usageOf({ documents: 2, uploads: 4, questions: 12 }),
+      );
+      const usage = q('demo-usage');
+      expect(usage?.getAttribute('aria-label')).toBe(
+        'Demo usage: 2 of 3 documents · 4 of 6 uploads · 12 of 30 questions',
+      );
+      expect(usage?.textContent).toContain(
+        'This is a demo: each account can keep 3 documents, upload 6 in total, and ask 30 questions.',
+      );
+      expect(q('drop-zone')).not.toBeNull();
+    });
+
+    it('disables uploading at the document limit', async () => {
+      await render(list(READY), usageOf({ documents: 3, uploads: 3 }));
+      expect(q('drop-zone')).toBeNull();
+      expect(blockedTitle()).toBe('Delete a document to upload another');
+      expect(
+        el.querySelector('[data-key="documents"]')?.hasAttribute('data-full'),
+      ).toBe(true);
+    });
+
+    it('pauses uploading while search is out of budget', async () => {
+      await render(list(READY), { ...usageOf(), searchQuotaExhausted: true });
+      expect(q('drop-zone')).toBeNull();
+      expect(blockedTitle()).toBe('Uploads are paused this month');
+    });
+
+    it('disables uploading for good once all uploads are used', async () => {
+      // Also at the document limit: the permanent reason wins.
+      await render(list(READY), usageOf({ documents: 3, uploads: 6 }));
+      expect(q('drop-zone')).toBeNull();
+      expect(blockedTitle()).toBe('You’ve used all 6 demo uploads');
+    });
   });
 });

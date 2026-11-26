@@ -22,6 +22,8 @@ import { HlmAlertDialogImports } from '@spartan-ng/helm/alert-dialog';
 import { HlmBadgeImports } from '@spartan-ng/helm/badge';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
 import { HlmSkeletonImports } from '@spartan-ng/helm/skeleton';
+import { DemoUsage } from '../../core/usage/demo-usage';
+import { DemoUsageSummary } from '../../core/usage/demo-usage-summary';
 import { DocumentUpload } from './document-upload';
 import { formatBytes } from './document-format';
 import { DOCUMENTS_URL, DocumentsApi } from './documents-api';
@@ -44,6 +46,7 @@ interface Notice {
     DatePipe,
     NgTemplateOutlet,
     DocumentUpload,
+    DemoUsageSummary,
     HlmAlertDialogImports,
     HlmBadgeImports,
     HlmButtonImports,
@@ -56,6 +59,7 @@ interface Notice {
 export class DocumentsPage {
   private readonly api = inject(DocumentsApi);
   private readonly injector = inject(Injector);
+  protected readonly usage = inject(DemoUsage);
 
   protected readonly documents = httpResource<ListDocumentsResponse>(
     () => DOCUMENTS_URL,
@@ -125,6 +129,12 @@ export class DocumentsPage {
     this.documents.reload();
   }
 
+  /** An upload started, finished or failed: both the list and the counts may have changed. */
+  protected onUploadChanged(): void {
+    this.documents.reload();
+    this.usage.refresh();
+  }
+
   protected askDelete(doc: DocumentSummary, event: Event): void {
     this.noticeState.set(null);
     this.deleteTrigger = event.currentTarget as HTMLElement | null;
@@ -185,6 +195,8 @@ export class DocumentsPage {
 
   private removed(doc: DocumentSummary, message: string): void {
     this.deletingId.set(null);
+    // A document slot is free again (uploads stay used).
+    this.usage.refresh();
     const without = (list: ListDocumentsResponse): ListDocumentsResponse => ({
       ...list,
       documents: list.documents.filter((d) => d.id !== doc.id),

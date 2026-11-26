@@ -28,6 +28,12 @@ import { HlmNativeSelectImports } from '@spartan-ng/helm/native-select';
 import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSkeletonImports } from '@spartan-ng/helm/skeleton';
 import { AppLogo } from '../../core/layout/app-logo';
+import { DemoUsage } from '../../core/usage/demo-usage';
+import { DemoUsageSummary } from '../../core/usage/demo-usage-summary';
+import {
+  QUESTION_LIMIT_MESSAGE,
+  SEARCH_QUOTA_MESSAGE,
+} from '../../core/usage/limit-errors';
 import { ChatComposer } from './chat-composer';
 import { ChatDocuments } from './chat-documents';
 import { ChatMarkdown } from './chat-markdown';
@@ -73,6 +79,7 @@ function referencedNumbers(text: string): Set<number> {
     ChatComposer,
     ChatMarkdown,
     ChatSidebar,
+    DemoUsageSummary,
     NgIcon,
     HlmButtonImports,
     HlmNativeSelectImports,
@@ -103,6 +110,9 @@ export class ChatPage {
   readonly conversationId = input<string>();
 
   protected readonly documents = inject(ChatDocuments);
+  protected readonly usage = inject(DemoUsage);
+  protected readonly questionLimitMessage = QUESTION_LIMIT_MESSAGE;
+  protected readonly searchQuotaMessage = SEARCH_QUOTA_MESSAGE;
   protected readonly shortName = shortDocumentName;
 
   protected readonly draft = signal('');
@@ -114,8 +124,17 @@ export class ChatPage {
       this.store.historyState() === 'ready',
   );
   protected readonly canCompose = computed(
-    () => !!this.models.selectedId() && this.historyShown(),
+    () =>
+      !!this.models.selectedId() &&
+      this.historyShown() &&
+      !this.usage.questionsBlocked(),
   );
+  protected readonly placeholder = computed(() => {
+    if (this.usage.questionsExhausted()) return 'No demo questions left';
+    if (this.usage.searchPaused()) return 'Questions are paused';
+    if (this.models.noneAvailable()) return 'Sending is unavailable';
+    return 'Ask a question about your documents…';
+  });
   protected readonly isEmpty = computed(
     () => this.store.entries().length === 0 && this.historyShown(),
   );

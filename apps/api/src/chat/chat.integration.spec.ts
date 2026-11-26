@@ -35,7 +35,14 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConflictException } from '@nestjs/common';
+import { APIError as AnthropicApiError } from '@anthropic-ai/sdk';
 import { chatNotFound } from '../common/chat-errors';
+import { limitError } from '../common/limit-errors';
+import { FIRESTORE } from '../firebase/firebase.module';
+import { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
+import { FakeFirestore } from '../usage/testing/fake-firestore';
+import { UsageRepository } from '../usage/usage.repository';
+import { UsageService } from '../usage/usage.service';
 
 class FakeTokenVerifier extends TokenVerifier {
   async verify(token: string): Promise<AuthUser> {
@@ -177,6 +184,12 @@ describe('chat stream (integration)', () => {
   const retrieval = new FakeRetrieval();
   const conversations = new FakeConversations();
   const documents = new FakeDocuments();
+  const db = new FakeFirestore();
+  let now = Date.parse('2026-11-10T12:00:00.000Z');
+  const quota = new ProviderQuotaTracker(() => now);
+  const USAGE = 'users/user-1/meta/usage';
+  const questionsUsed = () =>
+    (db.docs.get(USAGE)?.['questionsUsed'] as number | undefined) ?? 0;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -188,6 +201,10 @@ describe('chat stream (integration)', () => {
         { provide: LLM_PROVIDERS, useValue: [provider] },
         { provide: RetrievalService, useValue: retrieval },
         { provide: DocumentRepository, useValue: documents },
+        { provide: FIRESTORE, useValue: db.asFirestore() },
+        { provide: ProviderQuotaTracker, useValue: quota },
+        UsageRepository,
+        UsageService,
         {
           provide: ConversationsService,
           useValue: {
@@ -215,6 +232,8 @@ describe('chat stream (integration)', () => {
   });
 
   beforeEach(() => {
+    db.docs.clear();
+    now += 24 * 60 * 60_000; // forget any provider marked exhausted
     provider.requests = [];
     retrieval.calls = [];
     retrieval.options = [];
@@ -579,5 +598,213 @@ describe('chat stream (integration)', () => {
     expect(conversations.saved).toEqual([
       expect.objectContaining({ kind: 'user' }),
     ]);
+  });
+
+  describe('question quota', () => {
+    const spendCapError = () =>
+      AnthropicApiError.generate(
+        429,
+        {
+          type: 'error',
+          error: {
+            type: 'rate_limit_error',
+            message: 'You have reached your API usage limits: ...',
+            details: { error_code: 'enforced_spend_limit_reached' },
+          },
+        },
+        undefined,
+        new Headers(),
+      );
+
+    it('charges one question per answered request', async () => {
+      await readEvents(await post(question));
+      await readEvents(await post(question));
+      expect(questionsUsed()).toBe(2);
+    });
+
+    it('answers 403 question_limit_reached before retrieval or the model', async () => {
+      db.docs.set(USAGE, { uploadsUsed: 0, questionsUsed: 30 });
+      const res = await post(question);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: "You've used all 30 demo questions.",
+        code: 'question_limit_reached',
+      });
+      expect(retrieval.calls).toHaveLength(0);
+      expect(provider.requests).toHaveLength(0);
+      expect(conversations.saved).toHaveLength(0);
+      expect(questionsUsed()).toBe(30);
+    });
+
+    it('lets exactly the last question through a concurrent burst', async () => {
+      db.docs.set(USAGE, { uploadsUsed: 0, questionsUsed: 29 });
+      const statuses = await Promise.all(
+        Array.from({ length: 5 }, async () => {
+          const res = await post(question);
+          await res.text();
+          return res.status;
+        }),
+      );
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 403)).toHaveLength(4);
+      expect(questionsUsed()).toBe(30);
+    });
+
+    it.each([
+      ['an unknown conversation', { conversationId: 'zzzzzzzzzz0123456789' }],
+      ['an unknown document', { documentId: 'unknowndocument00001' }],
+      ['a document still processing', { documentId: DOC_BUSY }],
+      ['an unconfigured model', { modelId: 'gpt-6-luna' }],
+      ['invalid input', { message: '' }],
+    ])('does not charge for %s', async (_label, override) => {
+      const res = await post({ ...question, ...override });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(questionsUsed()).toBe(0);
+    });
+
+    it.each([
+      [
+        'a retrieval failure',
+        () => {
+          retrieval.failWith = Object.assign(new Error('index'), { code: 9 });
+        },
+      ],
+      [
+        'a document that changed after the list (409)',
+        () => {
+          retrieval.failWith = new ConflictException('not ready');
+        },
+      ],
+    ])('refunds after %s', async (_label, arrange) => {
+      arrange();
+      const res = await post(question);
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(questionsUsed()).toBe(0);
+    });
+
+    it('refunds when the model fails before any text', async () => {
+      provider.script = async function* () {
+        yield* [];
+        throw Object.assign(new Error('overloaded'), { status: 529 });
+      };
+      const events = await readEvents(await post(question));
+      expect(events.at(-1)).toMatchObject({ type: 'error', status: 502 });
+      expect(questionsUsed()).toBe(0);
+    });
+
+    it('keeps the charge for an empty answer (the call may be billed)', async () => {
+      provider.script = async function* () {
+        yield '  ';
+      };
+      await readEvents(await post(question));
+      expect(questionsUsed()).toBe(1);
+    });
+
+    it('keeps the charge for a rejected or blocked prompt (400)', async () => {
+      provider.script = async function* () {
+        yield* [];
+        throw Object.assign(new Error('blocked'), { status: 400 });
+      };
+      const events = await readEvents(await post(question));
+      expect(events.at(-1)).toMatchObject({ type: 'error', status: 400 });
+      expect(questionsUsed()).toBe(1);
+    });
+
+    it('does not refund after a partial answer', async () => {
+      provider.script = async function* () {
+        yield 'partial';
+        throw Object.assign(new Error('boom'), { status: 500 });
+      };
+      await readEvents(await post(question));
+      expect(questionsUsed()).toBe(1);
+    });
+
+    it('does not refund when the client leaves during retrieval', async () => {
+      let release!: () => void;
+      retrieval.gate = new Promise((resolve) => (release = resolve));
+      const client = new AbortController();
+      const pending = post(question, 'valid', client.signal).catch(
+        () => undefined,
+      );
+      await vi.waitFor(() => expect(retrieval.calls).toHaveLength(1));
+      client.abort();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      await pending;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(questionsUsed()).toBe(1);
+    });
+
+    it('does not refund when the client aborts mid-answer', async () => {
+      provider.script = (request) =>
+        (async function* () {
+          yield 'first ';
+          await new Promise((resolve) =>
+            request.signal?.addEventListener('abort', resolve),
+          );
+          throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+        })();
+      const client = new AbortController();
+      const res = await post(question, 'valid', client.signal);
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      await reader.read();
+      client.abort();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(questionsUsed()).toBe(1);
+    });
+
+    it('reports model exhaustion with a code, refunds, then fails fast without charging', async () => {
+      provider.script = async function* () {
+        yield* [];
+        throw spendCapError();
+      };
+      const events = await readEvents(await post(question));
+      expect(events.at(-1)).toMatchObject({
+        type: 'error',
+        status: 503,
+        code: 'model_quota_exhausted',
+        message:
+          'This model has reached its demo limit for this month. Try another model.',
+      });
+      expect(JSON.stringify(events)).not.toContain('usage limits');
+      expect(questionsUsed()).toBe(0);
+      expect(quota.isExhausted('anthropic')).toBe(true);
+
+      provider.requests = [];
+      retrieval.calls = [];
+      const res = await post(question);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ code: 'model_quota_exhausted' });
+      expect(retrieval.calls).toHaveLength(0);
+      expect(provider.requests).toHaveLength(0);
+      expect(questionsUsed()).toBe(0);
+    });
+
+    it('fails fast with search_quota_exhausted while embeddings are out of budget', async () => {
+      quota.markExhausted('openai');
+      const res = await post(question);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message:
+          'Document search has reached its demo limit for this month, so uploads and questions are paused.',
+        code: 'search_quota_exhausted',
+      });
+      expect(retrieval.calls).toHaveLength(0);
+      expect(questionsUsed()).toBe(0);
+    });
+
+    it('passes search_quota_exhausted from retrieval through and refunds', async () => {
+      retrieval.failWith = limitError('search_quota_exhausted');
+      const res = await post(question);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({
+        code: 'search_quota_exhausted',
+      });
+      expect(questionsUsed()).toBe(0);
+    });
   });
 });

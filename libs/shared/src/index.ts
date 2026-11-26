@@ -5,3 +5,4 @@ export * from './lib/documents';
 export * from './lib/chat';
 export * from './lib/conversations';
 export * from './lib/client-config';
+export * from './lib/usage';

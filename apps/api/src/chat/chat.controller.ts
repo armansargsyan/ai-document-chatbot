@@ -7,7 +7,12 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ChatRequest, ChatStreamEvent } from '@ai-document-chatbot/shared';
+import type {
+  ChatErrorCode,
+  ChatRequest,
+  ChatStreamEvent,
+  LimitErrorCode,
+} from '@ai-document-chatbot/shared';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthUser } from '../auth/token-verifier';
 import {
@@ -113,15 +118,25 @@ export class ChatController {
           `Unexpected chat stream failure: ${describeProviderError(error)}`,
         );
       }
-      writeEvent(res, {
+      const body = http.getResponse();
+      const code =
+        typeof body === 'object' && body !== null
+          ? (body as { code?: unknown }).code
+          : undefined;
+      const event: ChatStreamEvent = {
         type: 'error',
         status: http.getStatus(),
         message: http.message,
+        // e.g. `model_quota_exhausted` when the provider's cap is first hit mid-request.
+        ...(typeof code === 'string'
+          ? { code: code as ChatErrorCode | LimitErrorCode }
+          : {}),
         // Don't point a retry at a conversation that no longer exists.
         ...(http.getStatus() === 404
           ? {}
           : { conversationId: prepared.conversationId }),
-      });
+      };
+      writeEvent(res, event);
     } finally {
       if (!res.writableEnded) res.end();
     }

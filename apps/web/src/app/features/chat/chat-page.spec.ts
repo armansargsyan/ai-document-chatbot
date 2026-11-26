@@ -23,6 +23,9 @@ import {
   TEST_CONFIG,
   TEST_USER,
 } from '../../core/auth/testing/fake-auth-client';
+import { DemoUsage } from '../../core/usage/demo-usage';
+import { FakeDemoUsage } from '../../core/usage/testing/fake-demo-usage';
+import { usageOf } from '../../core/usage/testing/usage-fixtures';
 import { FETCH } from './chat-api';
 import { MODEL_STORAGE } from './chat-models';
 import { ChatPage, EXAMPLE_PROMPTS, shortDocumentName } from './chat-page';
@@ -68,9 +71,11 @@ describe('ChatPage', () => {
   let fake: FakeFetch;
   let harness: RouterTestingHarness;
   let httpMock: HttpTestingController;
+  let usage: FakeDemoUsage;
 
   beforeEach(() => {
     fake = new FakeFetch();
+    usage = new FakeDemoUsage();
     const auth = new FakeAuthClient();
     TestBed.configureTestingModule({
       providers: [
@@ -83,6 +88,8 @@ describe('ChatPage', () => {
         { provide: AuthClient, useValue: auth },
         { provide: FETCH, useValue: fake.fn },
         { provide: MODEL_STORAGE, useValue: new MemoryStorage() },
+        // The shell provides it in the app; a fake keeps HTTP out of it here.
+        { provide: DemoUsage, useValue: usage },
       ],
     });
     TestBed.inject(AuthService).start(TEST_CONFIG);
@@ -234,19 +241,19 @@ describe('ChatPage', () => {
       ).toEqual(['OpenAI', 'Claude', 'Gemini']);
       const gemini = must<HTMLOptionElement>(
         select,
-        'option[value="gemini-4-argon"]',
+        'option[value="gemini-3.8-flash"]',
       );
       expect(gemini.disabled).toBe(true);
       expect(gemini.textContent).toContain('(unavailable)');
       expect(select.value).toBe('claude-haiku-5-5');
 
-      select.value = 'gpt-6.2-astra';
+      select.value = 'gpt-6-luna';
       select.dispatchEvent(new Event('change'));
       await stable();
       const body = fake.stream();
       await typeAndSend('Hi');
       await until(() => expect(fake.calls).toHaveLength(1));
-      expect(fake.body().modelId).toBe('gpt-6.2-astra');
+      expect(fake.body().modelId).toBe('gpt-6-luna');
       body.close();
     });
 
@@ -264,6 +271,106 @@ describe('ChatPage', () => {
       expect(
         el().querySelector<HTMLSelectElement>('#chat-model')?.disabled,
       ).toBe(true);
+    });
+  });
+
+  describe('demo limits', () => {
+    const composer = () =>
+      must<HTMLTextAreaElement>(el(), '[data-testid="composer-input"]');
+
+    it('shows the usage under the composer, with the rules on demand', async () => {
+      usage.usage.set(usageOf({ documents: 2, uploads: 4, questions: 12 }));
+      await render();
+      const line = q('demo-usage');
+      expect(line?.textContent).toContain(
+        'Demo usage: 2 of 3 documents · 4 of 6 uploads · 12 of 30 questions',
+      );
+      const toggle = must<HTMLButtonElement>(
+        el(),
+        '[data-testid="demo-rules-toggle"]',
+      );
+      const rules = must<HTMLElement>(el(), '[data-testid="demo-rules"]');
+      expect(toggle.getAttribute('popovertarget')).toBe(rules.id);
+      expect(rules.hasAttribute('popover')).toBe(true);
+      expect(rules.textContent).toContain(
+        'This is a demo: each account can keep 3 documents, upload 6 in total, and ask 30 questions.',
+      );
+    });
+
+    it('disables the composer once every question is used', async () => {
+      usage.usage.set(usageOf({ questions: 30 }));
+      await render();
+      expect(q('questions-exhausted')?.textContent).toContain(
+        'You’ve used all 30 demo questions',
+      );
+      expect(q('questions-exhausted')?.getAttribute('role')).toBe('status');
+      expect(composer().disabled).toBe(true);
+      expect(composer().placeholder).toBe('No demo questions left');
+      expect(q<HTMLButtonElement>('composer-send')?.disabled).toBe(true);
+      expect(
+        all('example-prompt').every((b) => (b as HTMLButtonElement).disabled),
+      ).toBe(true);
+      expect(
+        el().querySelector('[data-key="questions"]')?.hasAttribute('data-full'),
+      ).toBe(true);
+    });
+
+    it('turns off sending when the question limit is hit mid-session', async () => {
+      await render();
+      fake.json(403, {
+        statusCode: 403,
+        code: 'question_limit_reached',
+        message: 'You’ve used all 30 demo questions.',
+      });
+      await typeAndSend('Hi');
+      await until(() => expect(q('turn-error')).not.toBeNull());
+      expect(usage.limits).toEqual(['question_limit_reached']);
+      // The refresh it asks for reports the quota used up.
+      usage.usage.set(usageOf({ questions: 30 }));
+      await stable();
+      expect(composer().disabled).toBe(true);
+      expect(q<HTMLButtonElement>('retry-button')?.disabled).toBe(true);
+    });
+
+    it('pauses questions when document search is out of budget', async () => {
+      await render();
+      fake.json(503, { statusCode: 503, code: 'search_quota_exhausted' });
+      await typeAndSend('Hi');
+      await until(() => expect(q('search-paused')).not.toBeNull());
+      expect(q('search-paused')?.textContent).toContain(
+        'Questions and uploads are paused this month',
+      );
+      expect(q('turn-error')?.textContent).toContain(
+        'Document search has reached its demo limit for this month',
+      );
+      expect(composer().disabled).toBe(true);
+      expect(composer().placeholder).toBe('Questions are paused');
+    });
+
+    it('shows the paused notice up front when the usage says search is out of budget', async () => {
+      usage.searchPaused.set(true);
+      await render();
+      expect(q('search-paused')?.textContent).toContain(
+        'Questions and uploads are paused this month',
+      );
+      expect(composer().disabled).toBe(true);
+    });
+
+    it('says when every model is out of its monthly budget', async () => {
+      await render('/chat', {
+        models: {
+          ...MODELS,
+          models: MODELS.models.map((m) => ({
+            ...m,
+            available: false,
+            unavailableReason: 'quota_exhausted' as const,
+          })),
+        },
+      });
+      expect(q('no-models')?.textContent).toContain(
+        'Every model has reached its demo limit',
+      );
+      expect(composer().disabled).toBe(true);
     });
   });
 
@@ -567,6 +674,54 @@ describe('ChatPage', () => {
       expect(fake.calls).toHaveLength(2);
       expect(fake.body(1).message).toBe('Hi');
       expect(all('user-message')).toHaveLength(1);
+    });
+
+    it('refreshes the demo usage after each answer', async () => {
+      await render();
+      const body = fake.stream();
+      await typeAndSend('Hi');
+      expect(usage.refreshes).toBe(0);
+      await answer(body);
+      await until(() => expect(usage.refreshes).toBe(1));
+    });
+
+    it('explains an exhausted model and reloads the switcher', async () => {
+      await render();
+      fake.json(503, {
+        statusCode: 503,
+        code: 'model_quota_exhausted',
+        message: 'anthropic credit balance is too low',
+      });
+      await sendWithoutWaiting('Hi');
+      // The model list is reloaded; that request keeps the app unstable.
+      const reload = await vi.waitFor(() => {
+        TestBed.tick();
+        return httpMock.expectOne('/api/models');
+      });
+      reload.flush({
+        ...MODELS,
+        models: MODELS.models.map((m) =>
+          m.id === 'claude-haiku-5-5'
+            ? { ...m, available: false, unavailableReason: 'quota_exhausted' }
+            : m,
+        ),
+      });
+      await until(() =>
+        expect(q('turn-error')?.textContent).toContain(
+          'This model has reached its demo limit for this month. Try another model.',
+        ),
+      );
+      expect(el().textContent).not.toContain('credit balance');
+      const select = must<HTMLSelectElement>(el(), '#chat-model');
+      expect(select.value).toBe('gpt-6-luna');
+      const haiku = must<HTMLOptionElement>(
+        select,
+        'option[value="claude-haiku-5-5"]',
+      );
+      expect(haiku.disabled).toBe(true);
+      expect(haiku.textContent?.trim()).toBe(
+        'Claude Haiku 5.5 (monthly demo limit reached)',
+      );
     });
 
     it('offers "Jump to latest" after the user scrolls up', async () => {

@@ -1,5 +1,5 @@
-/** Largest PDF the api accepts (bytes). */
-export const MAX_PDF_BYTES = 10 * 1024 * 1024;
+/** Largest PDF the api accepts (bytes): the demo limit. */
+export const MAX_PDF_BYTES = 3 * 1024 * 1024;
 /** Most pages the api will ingest from one PDF. */
 export const MAX_PDF_PAGES = 300;
 /** Most text chunks one PDF may produce (~2.4M characters); bounds embedding cost per upload. */

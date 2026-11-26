@@ -44,11 +44,10 @@ export const envSchema = z
     FIREBASE_AUTH_EMULATOR_HOST: hostPort.optional(),
     FIREBASE_STORAGE_EMULATOR_HOST: hostPort.optional(),
 
-    // Per-user limits (keyed by Firebase uid).
+    // Per-user burst limits (keyed by Firebase uid). No daily limits: the
+    // lifetime demo quotas (DEMO_LIMITS) bound total usage.
     RATE_LIMIT_CHAT_PER_MINUTE: limit(10),
-    RATE_LIMIT_CHAT_PER_DAY: limit(200),
     RATE_LIMIT_UPLOADS_PER_HOUR: limit(10),
-    RATE_LIMIT_UPLOADS_PER_DAY: limit(30),
   })
   .superRefine((env, ctx) => {
     if (!!env.FIREBASE_CLIENT_EMAIL !== !!env.FIREBASE_PRIVATE_KEY) {

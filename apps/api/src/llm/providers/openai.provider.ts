@@ -27,8 +27,26 @@ export class OpenAiProvider implements LlmProvider {
       if (event.type === 'response.output_text.delta') {
         yield event.delta;
       } else if (event.type === 'error' || event.type === 'response.failed') {
-        throw Object.assign(new Error('OpenAI stream failed'), { status: 502 });
+        // Keep the vendor `code` (e.g. `insufficient_quota`) so quota exhaustion is recognized.
+        const code =
+          event.type === 'error' ? event.code : event.response?.error?.code;
+        throw Object.assign(new Error('OpenAI stream failed'), {
+          status: streamFailureStatus(code),
+          code: code ?? undefined,
+        });
       }
     }
   }
+}
+
+/**
+ * The request was already accepted (and may be billed) when a stream event
+ * fails. Only a server error (502) or a rate limit (429) counts as unbilled;
+ * anything else, e.g. `invalid_prompt`, is a 400 so the question isn't refunded.
+ * Quota exhaustion is recognized by `code`, independent of this status.
+ */
+function streamFailureStatus(code: string | null | undefined): number {
+  if (code === 'server_error') return 502;
+  if (code === 'rate_limit_exceeded') return 429;
+  return 400;
 }

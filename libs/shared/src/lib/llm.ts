@@ -5,15 +5,9 @@ export type LlmProviderId = 'openai' | 'anthropic' | 'gemini';
  * is rejected. Edit this list to add or retire models.
  */
 export const LLM_MODELS = [
-  { id: 'gpt-6.2-astra', provider: 'openai', label: 'GPT-6.2 Astra' },
+  // Demo: one cheap model per provider (each provider has a hard monthly cap).
   { id: 'gpt-6-luna', provider: 'openai', label: 'GPT-6 Luna' },
-  {
-    id: 'claude-sonnet-5-5',
-    provider: 'anthropic',
-    label: 'Claude Sonnet 5.5',
-  },
   { id: 'claude-haiku-5-5', provider: 'anthropic', label: 'Claude Haiku 5.5' },
-  { id: 'gemini-4-argon', provider: 'gemini', label: 'Gemini 4 Argon' },
   { id: 'gemini-3.8-flash', provider: 'gemini', label: 'Gemini 3.8 Flash' },
 ] as const satisfies readonly {
   id: string;
@@ -47,6 +41,11 @@ export interface LlmModelInfo {
   provider: LlmProviderId;
   label: string;
   available: boolean;
+  /**
+   * Why the model can't be used, when `available` is false: no API key on the
+   * server, or the provider's monthly demo budget is used up.
+   */
+  unavailableReason?: 'not_configured' | 'quota_exhausted';
 }
 
 /** Response of `GET /api/models`. */

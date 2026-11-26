@@ -31,9 +31,7 @@ class FakeTokenVerifier extends TokenVerifier {
 
 const limits: RateLimitConfig = {
   chatPerMinute: 2,
-  chatPerDay: 100,
   uploadsPerHour: 1,
-  uploadsPerDay: 100,
 };
 
 @Global()
@@ -180,7 +178,7 @@ describe('rate limit wiring', () => {
     ).toBeUndefined();
   });
 
-  it('builds the four windows from config', () => {
+  it('builds only the burst windows from config (no daily limits)', () => {
     expect(
       buildThrottlers(limits).map(({ name, ttl, limit }) => ({
         name,
@@ -189,9 +187,7 @@ describe('rate limit wiring', () => {
       })),
     ).toEqual([
       { name: 'chat-minute', ttl: 60_000, limit: 2 },
-      { name: 'chat-day', ttl: 86_400_000, limit: 100 },
       { name: 'upload-hour', ttl: 3_600_000, limit: 1 },
-      { name: 'upload-day', ttl: 86_400_000, limit: 100 },
     ]);
   });
 });
@@ -200,29 +196,21 @@ describe('limitMessage', () => {
   it.each([
     [
       'chat',
-      60_000,
       42,
       "You're sending messages too quickly. Try again in 42 seconds.",
     ],
-    [
-      'chat',
-      86_400_000,
-      7 * 3600,
-      "You've reached today's message limit. Try again in 7 hours.",
-    ],
+    ['chat', 1, "You're sending messages too quickly. Try again in 1 second."],
     [
       'upload',
-      3_600_000,
       600,
       "You've reached the upload limit. Try again in 10 minutes.",
     ],
     [
       'upload',
-      86_400_000,
-      1,
-      "You've reached today's upload limit. Try again in 1 second.",
+      2 * 3600,
+      "You've reached the upload limit. Try again in 2 hours.",
     ],
-  ] as const)('%s / ttl %d / %ds', (kind, ttl, retry, expected) => {
-    expect(limitMessage(kind, ttl, retry)).toBe(expected);
+  ] as const)('%s / %ds', (kind, retry, expected) => {
+    expect(limitMessage(kind, retry)).toBe(expected);
   });
 });

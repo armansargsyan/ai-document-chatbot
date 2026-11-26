@@ -4,6 +4,14 @@ import type { LlmProviderId } from '@ai-document-chatbot/shared';
 import type { ChatStreamRequest, LlmProvider } from './llm-provider';
 import { LlmRequestAbortedError } from './llm-errors';
 import { FIRST_TOKEN_TIMEOUT_MS, LlmService } from './llm.service';
+import { ProviderQuotaTracker } from './provider-quota-tracker';
+
+function makeService(
+  providers: LlmProvider[],
+  quota = new ProviderQuotaTracker(),
+): LlmService {
+  return new LlmService(providers, quota);
+}
 
 class FakeProvider implements LlmProvider {
   readonly requests: ChatStreamRequest[] = [];
@@ -44,7 +52,7 @@ describe('LlmService', () => {
   it('routes the model to its provider and streams the deltas', async () => {
     const anthropic = new FakeProvider('anthropic', () => chunks('Hel', 'lo'));
     const openai = new FakeProvider('openai', () => chunks('wrong'));
-    const service = new LlmService([anthropic, openai]);
+    const service = makeService([anthropic, openai]);
     const caller = new AbortController();
     const signal = caller.signal;
 
@@ -80,7 +88,7 @@ describe('LlmService', () => {
   it('applies a default output-token limit', async () => {
     const gemini = new FakeProvider('gemini', () => chunks('ok'));
     await collect(
-      new LlmService([gemini]).streamChat({
+      makeService([gemini]).streamChat({
         modelId: 'gemini-3.8-flash',
         messages,
       }),
@@ -91,7 +99,7 @@ describe('LlmService', () => {
   it('rejects models outside the allow-list with 400, before calling any provider', async () => {
     const openai = new FakeProvider('openai', () => chunks('x'));
     const error = await failure(
-      new LlmService([openai]).streamChat({ modelId: 'gpt-made-up', messages }),
+      makeService([openai]).streamChat({ modelId: 'gpt-made-up', messages }),
     );
     expect((error as HttpException).getStatus()).toBe(400);
     expect(openai.requests).toHaveLength(0);
@@ -99,7 +107,7 @@ describe('LlmService', () => {
 
   it('returns 503 when the model provider has no API key configured', async () => {
     const error = await failure(
-      new LlmService([]).streamChat({ modelId: 'gpt-6-luna', messages }),
+      makeService([]).streamChat({ modelId: 'gpt-6-luna', messages }),
     );
     expect((error as HttpException).getStatus()).toBe(503);
   });
@@ -129,7 +137,7 @@ describe('LlmService', () => {
         }),
       }));
       const error = await failure(
-        new LlmService([provider]).streamChat({
+        makeService([provider]).streamChat({
           modelId: 'gpt-6-luna',
           messages,
         }),
@@ -150,8 +158,8 @@ describe('LlmService', () => {
     const out: string[] = [];
     const error = await (async () => {
       try {
-        for await (const part of new LlmService([provider]).streamChat({
-          modelId: 'claude-sonnet-5-5',
+        for await (const part of makeService([provider]).streamChat({
+          modelId: 'claude-haiku-5-5',
           messages,
         })) {
           out.push(part);
@@ -171,7 +179,7 @@ describe('LlmService', () => {
       caller.abort();
       throw Object.assign(new Error('aborted'), { name: 'APIUserAbortError' });
     });
-    const service = new LlmService([provider]);
+    const service = makeService([provider]);
     const warn = vi.spyOn(service['logger'], 'warn');
     const error = await failure(
       service.streamChat({
@@ -192,7 +200,7 @@ describe('LlmService', () => {
         name: 'AbortError',
       });
     });
-    const service = new LlmService([provider]);
+    const service = makeService([provider]);
     const warn = vi.spyOn(service['logger'], 'warn');
     const error = await failure(
       service.streamChat({
@@ -227,7 +235,7 @@ describe('LlmService', () => {
 
     it('fails with 504 when no delta arrives in time', async () => {
       const result = failure(
-        new LlmService([hangingProvider()]).streamChat({
+        makeService([hangingProvider()]).streamChat({
           modelId: 'claude-haiku-5-5',
           messages,
           signal: new AbortController().signal,
@@ -256,7 +264,7 @@ describe('LlmService', () => {
         yield 'late';
       });
       const result = collect(
-        new LlmService([provider]).streamChat({
+        makeService([provider]).streamChat({
           modelId: 'claude-haiku-5-5',
           messages,
         }),
@@ -273,8 +281,8 @@ describe('LlmService', () => {
         yield 'answer';
       });
       const result = collect(
-        new LlmService([provider]).streamChat({
-          modelId: 'gpt-6.2-astra',
+        makeService([provider]).streamChat({
+          modelId: 'gpt-6-luna',
           messages,
         }),
       );
@@ -283,17 +291,120 @@ describe('LlmService', () => {
     });
   });
 
-  it('lists every allow-listed model with availability', () => {
-    const result = new LlmService([
+  it('lists every allow-listed model with availability and the reason', () => {
+    const result = makeService([
       new FakeProvider('gemini', () => chunks()),
     ]).listModels();
     expect(result.defaultModelId).toBe('claude-haiku-5-5');
-    expect(
-      result.models.find((m) => m.id === 'gemini-4-argon')?.available,
-    ).toBe(true);
-    expect(result.models.find((m) => m.id === 'gpt-6.2-astra')?.available).toBe(
-      false,
-    );
-    expect(result.models.every((m) => m.label.length > 0)).toBe(true);
+    expect(result.models).toEqual([
+      {
+        id: 'gpt-6-luna',
+        provider: 'openai',
+        label: 'GPT-6 Luna',
+        available: false,
+        unavailableReason: 'not_configured',
+      },
+      {
+        id: 'claude-haiku-5-5',
+        provider: 'anthropic',
+        label: 'Claude Haiku 5.5',
+        available: false,
+        unavailableReason: 'not_configured',
+      },
+      {
+        id: 'gemini-3.8-flash',
+        provider: 'gemini',
+        label: 'Gemini 3.8 Flash',
+        available: true,
+      },
+    ]);
+  });
+
+  describe('provider quota exhaustion', () => {
+    const quotaError = () =>
+      Object.assign(
+        new Error('429 You exceeded your current quota (sk-live-x)'),
+        {
+          status: 429,
+          code: 'insufficient_quota',
+          type: 'insufficient_quota',
+        },
+      );
+
+    it('maps exhaustion to 503 model_quota_exhausted and remembers it', async () => {
+      const quota = new ProviderQuotaTracker();
+      const openai = new FakeProvider('openai', () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(quotaError()),
+        }),
+      }));
+      const service = makeService(
+        [openai, new FakeProvider('anthropic', () => chunks('ok'))],
+        quota,
+      );
+      const error = await failure(
+        service.streamChat({ modelId: 'gpt-6-luna', messages }),
+      );
+      expect((error as HttpException).getStatus()).toBe(503);
+      expect((error as HttpException).getResponse()).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message:
+          'This model has reached its demo limit for this month. Try another model.',
+        code: 'model_quota_exhausted',
+      });
+      expect(quota.isExhausted('openai')).toBe(true);
+
+      const models = service.listModels().models;
+      expect(models.find((m) => m.id === 'gpt-6-luna')).toMatchObject({
+        available: false,
+        unavailableReason: 'quota_exhausted',
+      });
+      expect(models.find((m) => m.id === 'claude-haiku-5-5')).toMatchObject({
+        available: true,
+      });
+      expect(
+        models.find((m) => m.id === 'claude-haiku-5-5'),
+      ).not.toHaveProperty('unavailableReason');
+    });
+
+    it('fails fast for an exhausted provider without calling it', async () => {
+      const quota = new ProviderQuotaTracker();
+      quota.markExhausted('anthropic');
+      const anthropic = new FakeProvider('anthropic', () => chunks('x'));
+      const service = makeService([anthropic], quota);
+      expect(() => service.assertAvailable('claude-haiku-5-5')).toThrow(
+        HttpException,
+      );
+      const error = await failure(
+        service.streamChat({ modelId: 'claude-haiku-5-5', messages }),
+      );
+      expect((error as HttpException).getStatus()).toBe(503);
+      expect(anthropic.requests).toHaveLength(0);
+    });
+
+    it('keeps a normal rate limit as 429 and does not mark the provider', async () => {
+      const quota = new ProviderQuotaTracker();
+      const openai = new FakeProvider('openai', () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            Promise.reject(
+              Object.assign(new Error('Rate limit reached'), {
+                status: 429,
+                code: 'rate_limit_exceeded',
+                type: 'requests',
+              }),
+            ),
+        }),
+      }));
+      const error = await failure(
+        makeService([openai], quota).streamChat({
+          modelId: 'gpt-6-luna',
+          messages,
+        }),
+      );
+      expect((error as HttpException).getStatus()).toBe(429);
+      expect(quota.isExhausted('openai')).toBe(false);
+    });
   });
 });

@@ -11,9 +11,7 @@ export interface LlmApiKeys {
 
 export interface RateLimitConfig {
   chatPerMinute: number;
-  chatPerDay: number;
   uploadsPerHour: number;
-  uploadsPerDay: number;
 }
 
 export interface FirebaseConfig {
@@ -45,11 +43,7 @@ export class AppConfigService {
       chatPerMinute: this.config.get('RATE_LIMIT_CHAT_PER_MINUTE', {
         infer: true,
       }),
-      chatPerDay: this.config.get('RATE_LIMIT_CHAT_PER_DAY', { infer: true }),
       uploadsPerHour: this.config.get('RATE_LIMIT_UPLOADS_PER_HOUR', {
-        infer: true,
-      }),
-      uploadsPerDay: this.config.get('RATE_LIMIT_UPLOADS_PER_DAY', {
         infer: true,
       }),
     };

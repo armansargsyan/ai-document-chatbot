@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { MAX_PDF_BYTES, MAX_PDF_CHUNKS } from '@ai-document-chatbot/shared';
-import { Embedder } from '../embeddings/embedder';
+import { limitError } from '../common/limit-errors';
+import { Embedder, QuotaTrackingEmbedder } from '../embeddings/embedder';
+import { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
+import type { UsageService } from '../usage/usage.service';
 import type { DocumentRecord, DocumentRepository } from './document.repository';
 import {
   DocumentsService,
@@ -50,13 +53,33 @@ function setup() {
     extractPages: vi.fn(async () => ['Page one text', 'Page two text']),
   };
   const embedder = new FakeEmbedder();
+  const usage = {
+    // The real one creates the record in the quota transaction.
+    reserveUpload: vi.fn(
+      async (uid: string, id: string, record: DocumentRecord) => {
+        await repository.create(uid, id, record);
+      },
+    ),
+    refundUpload: vi.fn(async () => undefined),
+  };
+  const quota = new ProviderQuotaTracker();
   const make = (withEmbedder = true) =>
     new DocumentsService(
       repository as unknown as DocumentRepository,
       extractor as unknown as PdfTextExtractor,
-      withEmbedder ? embedder : null,
+      withEmbedder ? new QuotaTrackingEmbedder(embedder, quota) : null,
+      usage as unknown as UsageService,
+      quota,
     );
-  return { repository, extractor, embedder, service: make(), make };
+  return {
+    repository,
+    extractor,
+    embedder,
+    usage,
+    quota,
+    service: make(),
+    make,
+  };
 }
 
 async function status(promise: Promise<unknown>): Promise<number> {
@@ -119,6 +142,8 @@ describe('DocumentsService.upload', () => {
       status: 'ready',
       chunkCount: 2,
     });
+    expect(ctx.usage.reserveUpload).toHaveBeenCalledOnce();
+    expect(ctx.usage.refundUpload).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -136,6 +161,7 @@ describe('DocumentsService.upload', () => {
     );
     expect(ctx.repository.create).not.toHaveBeenCalled();
     expect(ctx.extractor.extractPages).not.toHaveBeenCalled();
+    expect(ctx.usage.reserveUpload).not.toHaveBeenCalled();
   });
 
   it('returns 503 when no embedding provider is configured', async () => {
@@ -222,9 +248,12 @@ describe('DocumentsService.upload', () => {
     });
   });
 
-  it('maps a failure creating the record to 502', async () => {
-    ctx.repository.create.mockRejectedValueOnce(new Error('firestore down'));
-    expect(await status(ctx.service.upload(UID, pdf()))).toBe(502);
+  it('passes a quota failure through without storing, embedding or refunding', async () => {
+    ctx.usage.reserveUpload.mockRejectedValueOnce(new Error('unexpected'));
+    await expect(ctx.service.upload(UID, pdf())).rejects.toThrow('unexpected');
+    expect(ctx.repository.saveFile).not.toHaveBeenCalled();
+    expect(ctx.embedder.embed).not.toHaveBeenCalled();
+    expect(ctx.usage.refundUpload).not.toHaveBeenCalled();
   });
 
   it('marks the document failed with 502 when storage fails', async () => {
@@ -235,6 +264,112 @@ describe('DocumentsService.upload', () => {
     expect(ctx.repository.update).toHaveBeenLastCalledWith(UID, ID, {
       status: 'failed',
     });
+    expect(ctx.embedder.embed).not.toHaveBeenCalled();
+  });
+});
+
+describe('DocumentsService.upload quotas', () => {
+  let ctx: ReturnType<typeof setup>;
+  beforeEach(() => {
+    ctx = setup();
+  });
+
+  it.each([
+    [
+      'document_limit_reached',
+      409,
+      'You can keep up to 3 documents. Delete one to upload another.',
+    ],
+    ['upload_limit_reached', 403, "You've used all 6 demo uploads."],
+  ] as const)(
+    'answers %s after validation, before storing or embedding',
+    async (code, expected, message) => {
+      ctx.usage.reserveUpload.mockRejectedValueOnce(limitError(code));
+      const error = (await ctx.service
+        .upload(UID, pdf())
+        .catch((e: unknown) => e)) as HttpException;
+      expect(error.getStatus()).toBe(expected);
+      expect(error.getResponse()).toMatchObject({ code, message });
+      // Cheap validation ran first; nothing paid or stored afterwards.
+      expect(ctx.extractor.extractPages).toHaveBeenCalled();
+      expect(ctx.repository.saveFile).not.toHaveBeenCalled();
+      expect(ctx.embedder.embed).not.toHaveBeenCalled();
+      expect(ctx.usage.refundUpload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not charge for a PDF that fails validation', async () => {
+    ctx.extractor.extractPages.mockRejectedValueOnce(new InvalidPdfError());
+    expect(await status(ctx.service.upload(UID, pdf()))).toBe(422);
+    expect(ctx.usage.reserveUpload).not.toHaveBeenCalled();
+    expect(ctx.usage.refundUpload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'an embedding provider error',
+      (c: ReturnType<typeof setup>) =>
+        c.embedder.embed.mockRejectedValueOnce(
+          Object.assign(new Error('overloaded'), { status: 500 }),
+        ),
+      502,
+    ],
+    [
+      'a storage error',
+      (c: ReturnType<typeof setup>) =>
+        c.repository.saveFile.mockRejectedValueOnce(new Error('bucket down')),
+      502,
+    ],
+    [
+      'a chunk write error',
+      (c: ReturnType<typeof setup>) =>
+        c.repository.saveChunks.mockRejectedValueOnce(new Error('batch')),
+      502,
+    ],
+    [
+      'an embedding rate limit',
+      (c: ReturnType<typeof setup>) =>
+        c.embedder.embed.mockRejectedValueOnce(
+          Object.assign(new Error('slow down'), { status: 429 }),
+        ),
+      429,
+    ],
+  ])('refunds the upload after %s', async (_label, fail, expected) => {
+    fail(ctx);
+    expect(await status(ctx.service.upload(UID, pdf()))).toBe(expected);
+    expect(ctx.usage.refundUpload).toHaveBeenCalledExactlyOnceWith(UID);
+  });
+
+  it('maps embeddings exhaustion to 503 search_quota_exhausted, refunds and then fails fast', async () => {
+    ctx.embedder.embed.mockRejectedValueOnce(
+      Object.assign(new Error('quota'), {
+        status: 429,
+        code: 'insufficient_quota',
+        type: 'insufficient_quota',
+      }),
+    );
+    const error = (await ctx.service
+      .upload(UID, pdf())
+      .catch((e: unknown) => e)) as HttpException;
+    expect(error.getStatus()).toBe(503);
+    expect(error.getResponse()).toMatchObject({
+      code: 'search_quota_exhausted',
+    });
+    expect(ctx.usage.refundUpload).toHaveBeenCalledOnce();
+    expect(ctx.quota.searchExhausted).toBe(true);
+
+    // Next upload: rejected before parsing, charging or calling OpenAI.
+    ctx.extractor.extractPages.mockClear();
+    ctx.usage.reserveUpload.mockClear();
+    ctx.embedder.embed.mockClear();
+    const next = (await ctx.service
+      .upload(UID, pdf())
+      .catch((e: unknown) => e)) as HttpException;
+    expect(next.getResponse()).toMatchObject({
+      code: 'search_quota_exhausted',
+    });
+    expect(ctx.extractor.extractPages).not.toHaveBeenCalled();
+    expect(ctx.usage.reserveUpload).not.toHaveBeenCalled();
     expect(ctx.embedder.embed).not.toHaveBeenCalled();
   });
 });
@@ -296,6 +431,8 @@ describe('DocumentsService.list / remove', () => {
       await ctx.service.remove(UID, ID);
       expect(ctx.repository.get).toHaveBeenCalledWith(UID, ID);
       expect(ctx.repository.delete).toHaveBeenCalledWith(UID, ID);
+      // Deleting frees a document slot but never gives an upload back.
+      expect(ctx.usage.refundUpload).not.toHaveBeenCalled();
     },
   );
 

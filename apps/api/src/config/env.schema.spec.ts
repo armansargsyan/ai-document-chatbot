@@ -67,17 +67,21 @@ describe('validateEnv', () => {
   it('applies rate-limit defaults and accepts overrides', () => {
     const env = validateEnv({ ...base, RATE_LIMIT_CHAT_PER_MINUTE: '5' });
     expect(env.RATE_LIMIT_CHAT_PER_MINUTE).toBe(5);
-    expect(env.RATE_LIMIT_CHAT_PER_DAY).toBe(200);
     expect(env.RATE_LIMIT_UPLOADS_PER_HOUR).toBe(10);
-    expect(env.RATE_LIMIT_UPLOADS_PER_DAY).toBe(30);
+  });
+
+  it('has no daily rate limits (lifetime demo quotas replace them)', () => {
+    const env = validateEnv({ ...base, RATE_LIMIT_CHAT_PER_DAY: '5' });
+    expect(env).not.toHaveProperty('RATE_LIMIT_CHAT_PER_DAY');
+    expect(env).not.toHaveProperty('RATE_LIMIT_UPLOADS_PER_DAY');
   });
 
   it('rejects non-positive or non-numeric rate limits', () => {
     expect(() =>
-      validateEnv({ ...base, RATE_LIMIT_UPLOADS_PER_DAY: '0' }),
-    ).toThrow(/RATE_LIMIT_UPLOADS_PER_DAY: must be at least 1/);
+      validateEnv({ ...base, RATE_LIMIT_UPLOADS_PER_HOUR: '0' }),
+    ).toThrow(/RATE_LIMIT_UPLOADS_PER_HOUR: must be at least 1/);
     expect(() =>
-      validateEnv({ ...base, RATE_LIMIT_CHAT_PER_DAY: 'lots' }),
-    ).toThrow(/RATE_LIMIT_CHAT_PER_DAY: must be a number/);
+      validateEnv({ ...base, RATE_LIMIT_CHAT_PER_MINUTE: 'lots' }),
+    ).toThrow(/RATE_LIMIT_CHAT_PER_MINUTE: must be a number/);
   });
 });
