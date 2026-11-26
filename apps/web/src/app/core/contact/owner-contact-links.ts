@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
+  lucideCode,
   lucideGithub,
   lucideGlobe,
   lucideLinkedin,
@@ -9,7 +10,7 @@ import {
 import { OWNER_CONTACT_INFO, type OwnerContact } from './owner-contact';
 
 export interface ContactLink {
-  readonly key: 'email' | 'linkedin' | 'github' | 'website';
+  readonly key: 'email' | 'linkedin' | 'github' | 'website' | 'source';
   readonly label: string;
   readonly href: string;
   readonly icon: string;
@@ -42,6 +43,7 @@ export function contactLinks(contact: OwnerContact): ContactLink[] {
     ['linkedin', 'LinkedIn', contact.linkedin, 'lucideLinkedin'],
     ['github', 'GitHub', contact.github, 'lucideGithub'],
     ['website', 'Website', contact.website, 'lucideGlobe'],
+    ['source', 'Source code', contact.source, 'lucideCode'],
   ];
   for (const [key, label, value, icon] of web) {
     const href = webUrl(value);
@@ -58,7 +60,13 @@ export function contactLinks(contact: OwnerContact): ContactLink[] {
   selector: 'app-owner-contact',
   imports: [NgIcon],
   providers: [
-    provideIcons({ lucideGithub, lucideGlobe, lucideLinkedin, lucideMail }),
+    provideIcons({
+      lucideCode,
+      lucideGithub,
+      lucideGlobe,
+      lucideLinkedin,
+      lucideMail,
+    }),
   ],
   template: `
     @if (visible) {

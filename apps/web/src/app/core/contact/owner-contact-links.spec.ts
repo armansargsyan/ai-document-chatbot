@@ -13,6 +13,7 @@ const EMPTY: OwnerContact = {
   linkedin: '',
   github: '',
   website: '',
+  source: '',
 };
 
 async function render(contact: OwnerContact) {
@@ -26,11 +27,19 @@ async function render(contact: OwnerContact) {
 }
 
 describe('OwnerContactLinks', () => {
-  it('renders nothing while no field is set (the shipped config)', async () => {
-    expect(Object.values(OWNER_CONTACT).every((v) => v === '')).toBe(true);
-    const el = await render(OWNER_CONTACT);
+  it('renders nothing while no field is set', async () => {
+    const el = await render(EMPTY);
     expect(el.querySelector('[data-testid="owner-contact"]')).toBeNull();
     expect(el.textContent?.trim()).toBe('');
+  });
+
+  it('turns every set field of the shipped config into a valid link', () => {
+    const set = Object.entries(OWNER_CONTACT).filter(
+      ([key, value]) => value !== '' && key !== 'name' && key !== 'tagline',
+    );
+    expect(contactLinks(OWNER_CONTACT).map((l) => l.key)).toEqual(
+      set.map(([key]) => key),
+    );
   });
 
   it('renders only the fields that are set', async () => {
@@ -77,15 +86,16 @@ describe('contactLinks', () => {
     ).toEqual([]);
   });
 
-  it('keeps the display order: email, LinkedIn, GitHub, website', () => {
+  it('keeps the display order: email, LinkedIn, GitHub, website, source', () => {
     expect(
       contactLinks({
         ...EMPTY,
+        source: 'https://s.example',
         website: 'https://w.example',
         email: 'a@b.co',
         linkedin: 'https://l.example',
         github: 'https://g.example',
       }).map((l) => l.key),
-    ).toEqual(['email', 'linkedin', 'github', 'website']);
+    ).toEqual(['email', 'linkedin', 'github', 'website', 'source']);
   });
 });

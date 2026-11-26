@@ -16,16 +16,19 @@ export interface OwnerContact {
   readonly linkedin: string;
   readonly github: string;
   readonly website: string;
+  /** This project's public repository. */
+  readonly source: string;
 }
 
-/** The owner's details. TODO(owner): fill in; all empty renders nothing. */
+/** The owner's details (public on purpose). Empty fields are hidden. */
 export const OWNER_CONTACT: OwnerContact = {
-  name: '',
-  tagline: '',
-  email: '',
-  linkedin: '',
-  github: '',
+  name: 'Arman Sargsyan',
+  tagline: 'Full-Stack & AI Engineer',
+  email: 'armansargsyan9991@gmail.com',
+  linkedin: 'https://www.linkedin.com/in/arman-sargsyan-a12a17153/',
+  github: 'https://github.com/armansargsyan',
   website: '',
+  source: 'https://github.com/armansargsyan/ai-document-chatbot',
 };
 
 /** Injectable so tests can supply values; defaults to {@link OWNER_CONTACT}. */
