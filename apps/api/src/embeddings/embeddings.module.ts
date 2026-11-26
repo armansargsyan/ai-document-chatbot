@@ -1,7 +1,8 @@
 import { Global, Module } from '@nestjs/common';
 import OpenAI from 'openai';
 import { AppConfigService } from '../config/app-config.service';
-import { Embedder, OpenAiEmbedder } from './embedder';
+import { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
+import { Embedder, OpenAiEmbedder, QuotaTrackingEmbedder } from './embedder';
 
 /**
  * Provides `Embedder`, or `null` when no OpenAI key is configured (callers
@@ -12,12 +13,18 @@ import { Embedder, OpenAiEmbedder } from './embedder';
   providers: [
     {
       provide: Embedder,
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService): Embedder | null => {
+      inject: [AppConfigService, ProviderQuotaTracker],
+      useFactory: (
+        config: AppConfigService,
+        quota: ProviderQuotaTracker,
+      ): Embedder | null => {
         const apiKey = config.llmApiKeys.openai;
         return apiKey
-          ? new OpenAiEmbedder(
-              new OpenAI({ apiKey, timeout: 60_000, maxRetries: 2 }),
+          ? new QuotaTrackingEmbedder(
+              new OpenAiEmbedder(
+                new OpenAI({ apiKey, timeout: 60_000, maxRetries: 2 }),
+              ),
+              quota,
             )
           : null;
       },

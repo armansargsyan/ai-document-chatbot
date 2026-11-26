@@ -1,3 +1,4 @@
+import type { LimitErrorCode } from './usage';
 import type { LlmModelId } from './llm';
 
 export const MAX_CHAT_MESSAGE_LENGTH = 4000;
@@ -49,6 +50,11 @@ export type ChatStreamEvent =
       type: 'error';
       status: number;
       message: string;
+      /**
+       * Machine-readable reason, e.g. `model_quota_exhausted` when the
+       * provider's monthly cap is hit mid-request (after `start`).
+       */
+      code?: ChatErrorCode | LimitErrorCode;
       /**
        * Set when the turn was already saved to a conversation (e.g. a new one),
        * so a retry continues it instead of creating a duplicate.

@@ -8,14 +8,20 @@ import {
 import { httpResource } from '@angular/common/http';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import type { MeResponse } from '@ai-document-chatbot/shared';
+import { NgIcon, provideIcons } from '@ng-icons/core';
+import { lucideInfo } from '@ng-icons/lucide';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
 import { AuthService } from '../auth/auth.service';
+import { OwnerContactLinks } from '../contact/owner-contact-links';
+import { DemoUsage } from '../usage/demo-usage';
+import { DEMO_RULES } from '../usage/limit-errors';
 import { AppLogo } from './app-logo';
 
 /**
- * Layout for every signed-in page: header (brand, nav, account, sign-out) and
- * a router outlet for the feature. The chat history sidebar (#12) is an
- * aside inside the chat page.
+ * Layout for every signed-in page: header (brand, nav, about, account,
+ * sign-out) and a router outlet for the feature. The chat history sidebar
+ * (#12) is an aside inside the chat page. Provides {@link DemoUsage}, so the
+ * pages share one usage count that starts fresh with each session.
  */
 @Component({
   selector: 'app-shell',
@@ -25,7 +31,10 @@ import { AppLogo } from './app-logo';
     RouterLinkActive,
     HlmButtonImports,
     AppLogo,
+    NgIcon,
+    OwnerContactLinks,
   ],
+  providers: [DemoUsage, provideIcons({ lucideInfo })],
   templateUrl: './app-shell.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -38,6 +47,8 @@ export class AppShell {
   ] as const;
 
   /** Fetched from the api (not Firebase) to prove the bearer token round trip. */
+  protected readonly demoRules = DEMO_RULES;
+
   protected readonly me = httpResource<MeResponse>(() => '/api/auth/me');
   protected readonly signingOut = signal(false);
   protected readonly signOutError = signal(false);

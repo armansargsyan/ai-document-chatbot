@@ -10,6 +10,7 @@ import type {
   Citation,
   LlmModelId,
 } from '@ai-document-chatbot/shared';
+import { limitError } from '../common/limit-errors';
 import { ConversationsService } from '../conversations/conversations.service';
 import { DocumentRepository } from '../documents/document.repository';
 import {
@@ -18,9 +19,12 @@ import {
   toHttpException,
 } from '../llm/llm-errors';
 import { LlmService } from '../llm/llm.service';
+import { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
+import { UsageService } from '../usage/usage.service';
 import {
   RetrievalService,
   assertSearchable,
+  type RetrievedChunk,
 } from '../retrieval/retrieval.service';
 import { SYSTEM_PROMPT, buildUserPrompt, toCitations } from './prompt';
 
@@ -72,14 +76,21 @@ export class ChatService {
     private readonly retrieval: RetrievalService,
     private readonly conversations: ConversationsService,
     private readonly documents: DocumentRepository,
+    private readonly usage: UsageService,
+    private readonly quota: ProviderQuotaTracker,
   ) {}
 
   /**
    * Everything that can fail before the first token, in order: model
+   * availability (incl. a known exhausted provider), document search
    * availability, conversation ownership (404), the scoped document (404/409)
-   * and the document list, then retrieval. Throws HttpExceptions, so the
-   * controller can still answer with a normal HTTP error before the SSE
-   * stream starts. Nothing paid (embedding, model) runs before these checks.
+   * and the document list, the question quota (403), then retrieval. Throws
+   * HttpExceptions, so the controller can still answer with a normal HTTP
+   * error before the SSE stream starts. Nothing paid (embedding, model) runs
+   * before these checks.
+   *
+   * The question is charged right before retrieval and refunded if the
+   * request then fails before any answer text, unless the client left.
    */
   async prepare(
     uid: string,
@@ -90,6 +101,7 @@ export class ChatService {
     if (!this.retrieval.available) {
       throw new ServiceUnavailableException('Document search is unavailable');
     }
+    if (this.quota.searchExhausted) throw limitError('search_quota_exhausted');
 
     // 404 for a conversation that isn't the caller's, before any paid call.
     const history = request.conversationId
@@ -111,13 +123,63 @@ export class ChatService {
       assertSearchable(documents.find((doc) => doc.id === documentId));
     }
 
-    let chunks;
+    // 403 question_limit_reached; from here on a failure refunds the question.
+    await this.usage.reserveQuestion(uid);
+
+    let chunks: RetrievedChunk[];
+    let conversationId: string;
     try {
-      chunks = await this.retrieval.retrieve(uid, request.message, {
-        documentId,
-      });
+      chunks = await this.retrieve(uid, request.message, documentId);
+      // The client left during retrieval: don't start (and pay for) a model call.
+      if (signal.aborted) throw new LlmRequestAbortedError();
+      conversationId = await this.conversations.recordUserMessage(
+        uid,
+        request.conversationId,
+        request.message,
+      );
+    } catch (error) {
+      if (!(error instanceof LlmRequestAbortedError) && !signal.aborted) {
+        await this.usage.refundQuestion(uid);
+      }
+      throw error;
+    }
+
+    return {
+      conversationId,
+      citations: toCitations(chunks),
+      stream: this.refundIfUnanswered(
+        uid,
+        signal,
+        this.llm.streamChat({
+          modelId: request.modelId,
+          system: SYSTEM_PROMPT,
+          messages: [
+            ...normalizeHistory(history),
+            {
+              role: 'user',
+              content: buildUserPrompt(request.message, chunks, {
+                documents,
+                scopedDocumentId: documentId,
+              }),
+            },
+          ],
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          signal,
+        }),
+      ),
+    };
+  }
+
+  private async retrieve(
+    uid: string,
+    message: string,
+    documentId: string | undefined,
+  ) {
+    try {
+      return await this.retrieval.retrieve(uid, message, { documentId });
     } catch (error) {
       // 404/409: the scoped document went away or changed since the list.
+      // 503 search_quota_exhausted: the embedder recognized the spend cap.
       if (error instanceof HttpException) throw error;
       this.logger.warn(`Retrieval failed: ${describeProviderError(error)}`);
       // Only a rate limit is worth surfacing as-is; anything else (bad embedding
@@ -127,35 +189,34 @@ export class ChatService {
         ? toHttpException(error)
         : new ServiceUnavailableException('Document search is unavailable');
     }
-    // The client left during retrieval: don't start (and pay for) a model call.
-    if (signal.aborted) throw new LlmRequestAbortedError();
+  }
 
-    const conversationId = await this.conversations.recordUserMessage(
-      uid,
-      request.conversationId,
-      request.message,
-    );
-
-    return {
-      conversationId,
-      citations: toCitations(chunks),
-      stream: this.llm.streamChat({
-        modelId: request.modelId,
-        system: SYSTEM_PROMPT,
-        messages: [
-          ...normalizeHistory(history),
-          {
-            role: 'user',
-            content: buildUserPrompt(request.message, chunks, {
-              documents,
-              scopedDocumentId: documentId,
-            }),
-          },
-        ],
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-        signal,
-      }),
-    };
+  /**
+   * Passes the answer through and refunds the question only when the provider
+   * failed before streaming anything, with an error that means the call was
+   * not billed: rate limited (429), provider failure (502) or unavailable /
+   * out of quota (503). Empty answers, rejected or blocked prompts (400) and
+   * timeouts (504) may have been billed, so they keep the charge; otherwise a
+   * user could repeat such a prompt for free and drain the provider's budget.
+   * No refund when the client aborted.
+   */
+  private async *refundIfUnanswered(
+    uid: string,
+    signal: AbortSignal,
+    stream: AsyncIterable<string>,
+  ): AsyncIterable<string> {
+    let started = false;
+    try {
+      for await (const text of stream) {
+        started = true;
+        yield text;
+      }
+    } catch (error) {
+      if (!started && !signal.aborted && isUnbilledFailure(error)) {
+        await this.usage.refundQuestion(uid);
+      }
+      throw error;
+    }
   }
 
   /** Saves the finished answer to the conversation. */
@@ -173,4 +234,12 @@ export class ChatService {
       },
     );
   }
+}
+
+const UNBILLED_STATUSES = new Set([429, 502, 503]);
+
+function isUnbilledFailure(error: unknown): boolean {
+  return (
+    error instanceof HttpException && UNBILLED_STATUSES.has(error.getStatus())
+  );
 }

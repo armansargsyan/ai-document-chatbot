@@ -4,8 +4,11 @@ import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import { MAX_PDF_BYTES } from '@ai-document-chatbot/shared';
 import { AuthModule } from '../auth/auth.module';
+import { limitError } from '../common/limit-errors';
 import { TokenVerifier, type AuthUser } from '../auth/token-verifier';
 import { Embedder } from '../embeddings/embedder';
+import { ProviderQuotaModule } from '../llm/provider-quota-tracker';
+import { UsageService } from '../usage/usage.service';
 import { DocumentRepository } from './document.repository';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
@@ -46,15 +49,21 @@ describe('documents (integration)', () => {
     delete: vi.fn(async () => undefined),
   };
 
+  const usage = {
+    reserveUpload: vi.fn(async () => undefined),
+    refundUpload: vi.fn(async () => undefined),
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [AuthModule],
+      imports: [AuthModule, ProviderQuotaModule],
       controllers: [DocumentsController],
       providers: [
         DocumentsService,
         PdfTextExtractor,
         { provide: DocumentRepository, useValue: repository },
         { provide: Embedder, useClass: FakeEmbedder },
+        { provide: UsageService, useValue: usage },
       ],
     })
       .overrideProvider(TokenVerifier)
@@ -100,10 +109,50 @@ describe('documents (integration)', () => {
     });
   });
 
-  it('rejects files over the size limit with 413', async () => {
+  it('rejects files over the 3 MB limit with 413 before charging an upload', async () => {
+    expect(MAX_PDF_BYTES).toBe(3 * 1024 * 1024);
+    usage.reserveUpload.mockClear();
     const big = Buffer.concat([makePdf(['x']), Buffer.alloc(MAX_PDF_BYTES)]);
     expect((await upload(big)).status).toBe(413);
+    expect(usage.reserveUpload).not.toHaveBeenCalled();
   });
+
+  it('accepts a PDF just under the limit', async () => {
+    const pdf = makePdf(['Alpha page']);
+    const padded = Buffer.concat([
+      pdf,
+      Buffer.alloc(MAX_PDF_BYTES - pdf.length, 0x20),
+    ]);
+    expect((await upload(padded)).status).toBe(201);
+  });
+
+  it.each([
+    [
+      'upload_limit_reached',
+      403,
+      'Forbidden',
+      "You've used all 6 demo uploads.",
+    ],
+    [
+      'document_limit_reached',
+      409,
+      'Conflict',
+      'You can keep up to 3 documents. Delete one to upload another.',
+    ],
+  ] as const)(
+    'answers %s as a JSON error with a code',
+    async (code, status, error, message) => {
+      usage.reserveUpload.mockRejectedValueOnce(limitError(code));
+      const res = await upload(makePdf(['Alpha page']));
+      expect(res.status).toBe(status);
+      expect(await res.json()).toEqual({
+        statusCode: status,
+        error,
+        message,
+        code,
+      });
+    },
+  );
 
   it('rejects a non-PDF with 415', async () => {
     expect(

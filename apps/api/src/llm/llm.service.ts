@@ -12,6 +12,7 @@ import {
   getLlmModel,
   isLlmModelId,
   type ChatMessage,
+  type LlmModelInfo,
   type LlmModelsResponse,
 } from '@ai-document-chatbot/shared';
 import { LLM_PROVIDERS, type LlmProvider } from './llm-provider';
@@ -19,8 +20,11 @@ import {
   LlmRequestAbortedError,
   describeProviderError,
   isAbortLike,
+  isQuotaExhausted,
   toHttpException,
 } from './llm-errors';
+import { limitError } from '../common/limit-errors';
+import { ProviderQuotaTracker } from './provider-quota-tracker';
 
 export interface StreamChatOptions {
   /** Model id from the shared allow-list. */
@@ -45,11 +49,17 @@ export class LlmService {
   private readonly logger = new Logger(LlmService.name);
   private readonly providers: ReadonlyMap<string, LlmProvider>;
 
-  constructor(@Inject(LLM_PROVIDERS) providers: LlmProvider[]) {
+  constructor(
+    @Inject(LLM_PROVIDERS) providers: LlmProvider[],
+    private readonly quota: ProviderQuotaTracker,
+  ) {
     this.providers = new Map(providers.map((p) => [p.id, p]));
   }
 
-  /** Throws 400 for a model outside the allow-list, 503 if its provider has no key. */
+  /**
+   * Throws 400 for a model outside the allow-list, 503 if its provider has no
+   * key, and 503 `model_quota_exhausted` if its provider's demo budget is used up.
+   */
   assertAvailable(modelId: string): void {
     this.resolve(modelId);
   }
@@ -65,17 +75,32 @@ export class LlmService {
         'The selected model is unavailable',
       );
     }
+    if (this.quota.isExhausted(model.provider)) {
+      throw limitError('model_quota_exhausted');
+    }
     return { model, provider };
   }
 
   listModels(): LlmModelsResponse {
     return {
-      models: LLM_MODELS.map((m) => ({
-        id: m.id,
-        provider: m.provider,
-        label: m.label,
-        available: this.providers.has(m.provider),
-      })),
+      models: LLM_MODELS.map((m): LlmModelInfo => {
+        const info = { id: m.id, provider: m.provider, label: m.label };
+        if (!this.providers.has(m.provider)) {
+          return {
+            ...info,
+            available: false,
+            unavailableReason: 'not_configured',
+          };
+        }
+        if (this.quota.isExhausted(m.provider)) {
+          return {
+            ...info,
+            available: false,
+            unavailableReason: 'quota_exhausted',
+          };
+        }
+        return { ...info, available: true };
+      }),
       defaultModelId: DEFAULT_LLM_MODEL_ID,
     };
   }
@@ -84,6 +109,8 @@ export class LlmService {
    * Streams text deltas. Validation errors are thrown on the first iteration,
    * before any upstream call. Vendor errors are mapped to HttpExceptions with
    * generic messages; no upstream activity within FIRST_TOKEN_TIMEOUT_MS is a 504.
+   * Out of credit / spend cap marks the provider exhausted and is a 503
+   * `model_quota_exhausted`.
    * If `options.signal` aborted, throws `LlmRequestAbortedError` instead.
    */
   async *streamChat(options: StreamChatOptions): AsyncIterable<string> {
@@ -109,8 +136,11 @@ export class LlmService {
       }
     } catch (error) {
       if (options.signal?.aborted) throw new LlmRequestAbortedError();
-      const mapped =
-        firstToken.signal.aborted && isAbortLike(error)
+      const exhausted = isQuotaExhausted(model.provider, error);
+      if (exhausted) this.quota.markExhausted(model.provider);
+      const mapped = exhausted
+        ? limitError('model_quota_exhausted')
+        : firstToken.signal.aborted
           ? new GatewayTimeoutException('The model provider timed out')
           : toHttpException(error);
       this.logger.warn(

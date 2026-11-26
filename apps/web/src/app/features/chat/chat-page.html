@@ -263,7 +263,11 @@
                 variant="outline"
                 size="sm"
                 data-testid="retry-button"
-                [disabled]="store.streaming() || !models.selectedId()"
+                [disabled]="
+                  store.streaming() ||
+                  !models.selectedId() ||
+                  usage.questionsBlocked()
+                "
                 (click)="retry(entry)"
               >
                 Retry
@@ -348,17 +352,45 @@
   }
 
   <div class="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
-    @if (models.noneAvailable()) {
+    @if (usage.questionsExhausted()) {
+    <div
+      class="mb-3 rounded-lg border border-border bg-muted/50 px-3.5 py-2.5 text-sm"
+      role="status"
+      data-testid="questions-exhausted"
+    >
+      <p class="font-medium">{{ questionLimitMessage }}</p>
+      <p class="mt-0.5 text-muted-foreground">
+        Thanks for trying the demo. Your conversations stay here to read.
+      </p>
+    </div>
+    } @else if (usage.searchPaused()) {
+    <div
+      class="mb-3 rounded-lg border border-border bg-muted/50 px-3.5 py-2.5 text-sm"
+      role="status"
+      data-testid="search-paused"
+    >
+      <p class="font-medium">Questions and uploads are paused this month</p>
+      <p class="mt-0.5 text-muted-foreground">{{ searchQuotaMessage }}</p>
+    </div>
+    } @else if (models.noneAvailable()) {
     <div
       class="mb-3 rounded-lg border border-border bg-muted/50 px-3.5 py-2.5 text-sm"
       role="status"
       data-testid="no-models"
     >
+      @if (models.noneAvailableQuota()) {
+      <p class="font-medium">Every model has reached its demo limit</p>
+      <p class="mt-0.5 text-muted-foreground">
+        Each AI provider has a monthly budget for this demo, and they’re all
+        used up. Try again next month.
+      </p>
+      } @else {
       <p class="font-medium">No AI models are available right now</p>
       <p class="mt-0.5 text-muted-foreground">
         The server has no AI provider configured, so sending is turned off. Try
         again later.
       </p>
+      }
     </div>
     } @else if (models.loadFailed()) {
     <p
@@ -383,11 +415,7 @@
       [(text)]="draft"
       [streaming]="store.streaming()"
       [disabled]="!canCompose()"
-      [placeholder]="
-        models.noneAvailable()
-          ? 'Sending is unavailable'
-          : 'Ask a question about your documents…'
-      "
+      [placeholder]="placeholder()"
       (send)="send($event)"
       (stop)="stop()"
     >
@@ -419,9 +447,9 @@
               [value]="m.id"
               [disabled]="!m.available"
               [selected]="m.id === models.selectedId()"
-              [attr.title]="m.available ? null : 'No API key is configured for ' + group.label"
+              [attr.title]="models.optionTitle(m)"
             >
-              {{ m.label }}{{ m.available ? '' : ' (unavailable)' }}
+              {{ models.optionLabel(m) }}
             </option>
             }
           </optgroup>
@@ -466,6 +494,7 @@
         }
       </div>
     </app-chat-composer>
+    <app-demo-usage layout="inline" class="mt-1.5" />
   </div>
 </main>
 

@@ -1,4 +1,5 @@
 import type { ChatStreamEvent, Citation } from '@ai-document-chatbot/shared';
+import { serverCode } from './chat-errors';
 
 /** One server-sent event: its `event:` name and its (joined) `data:` lines. */
 export interface SseMessage {
@@ -108,11 +109,13 @@ export function toChatStreamEvent(message: SseMessage): ChatStreamEvent | null {
     }
     case 'error': {
       const { status, message: text, conversationId } = parsed;
+      const code = serverCode(parsed);
       return {
         type: 'error',
         status: typeof status === 'number' ? status : 500,
         message: typeof text === 'string' ? text : '',
         ...(typeof conversationId === 'string' ? { conversationId } : {}),
+        ...(code ? { code } : {}),
       };
     }
     default:

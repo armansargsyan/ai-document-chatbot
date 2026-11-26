@@ -25,6 +25,11 @@ export interface DocumentRecord {
 
 /** Collection group queried by retrieval (#6); `uid` scopes vector search to one user. */
 export const CHUNKS_COLLECTION = 'chunks';
+/** `users/{uid}/documents`; also read by the usage quota transaction. */
+export function documentsCollection(db: Firestore, uid: string) {
+  return db.collection('users').doc(uid).collection('documents');
+}
+
 /** Chunks per batch: ~400 × (1536-dim vector + text) stays well under the 10 MiB request limit. */
 const WRITE_BATCH_SIZE = 400;
 
@@ -42,7 +47,7 @@ export class DocumentRepository {
   ) {}
 
   private documents(uid: string) {
-    return this.db.collection('users').doc(uid).collection('documents');
+    return documentsCollection(this.db, uid);
   }
 
   newId(uid: string): string {
@@ -53,6 +58,7 @@ export class DocumentRepository {
     return `users/${uid}/documents/${id}.pdf`;
   }
 
+  /** Creates a record outside the quota (uploads go through `UsageRepository.reserveUpload`). */
   async create(uid: string, id: string, record: DocumentRecord): Promise<void> {
     await this.documents(uid).doc(id).create(record);
   }

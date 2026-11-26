@@ -78,11 +78,19 @@ export class ChatModels {
   readonly loadFailed = computed(
     () => !!this.resource.error() && !this.response(),
   );
-  /** Loaded, but no provider has a key configured. */
+  /** Loaded, but no model can be used (no key configured, or out of budget). */
   readonly noneAvailable = computed(() => {
     const response = this.response();
     return !!response && !response.models.some((m) => m.available);
   });
+  /** None is available and at least one is out of its monthly demo budget. */
+  readonly noneAvailableQuota = computed(
+    () =>
+      this.noneAvailable() &&
+      !!this.response()?.models.some(
+        (m) => m.unavailableReason === 'quota_exhausted',
+      ),
+  );
   readonly someUnavailable = computed(
     () => !!this.response()?.models.some((m) => !m.available),
   );
@@ -140,6 +148,23 @@ export class ChatModels {
 
   reload(): void {
     this.resource.reload();
+  }
+
+  /** The switcher's text for a model: its label, plus why it can't be picked. */
+  optionLabel(model: LlmModelInfo): string {
+    if (model.available) return model.label;
+    return model.unavailableReason === 'quota_exhausted'
+      ? `${model.label} (monthly demo limit reached)`
+      : `${model.label} (unavailable)`;
+  }
+
+  /** Tooltip for an unavailable model; null when it can be picked. */
+  optionTitle(model: LlmModelInfo): string | null {
+    if (model.available) return null;
+    const provider = PROVIDER_LABELS[model.provider] ?? model.provider;
+    return model.unavailableReason === 'quota_exhausted'
+      ? `${provider} has reached its demo limit for this month`
+      : `No API key is configured for ${provider}`;
   }
 
   private readSaved(): string | null {

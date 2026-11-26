@@ -19,8 +19,11 @@ import {
   type DocumentSummary,
   type ListDocumentsResponse,
 } from '@ai-document-chatbot/shared';
+import { limitError } from '../common/limit-errors';
 import { Embedder } from '../embeddings/embedder';
 import { describeProviderError, toHttpException } from '../llm/llm-errors';
+import { ProviderQuotaTracker } from '../llm/provider-quota-tracker';
+import { UsageService } from '../usage/usage.service';
 import { DEFAULT_CHUNK_OPTIONS, chunkPages } from './chunking';
 import {
   DocumentRepository,
@@ -79,7 +82,15 @@ export class DocumentsService {
     private readonly repository: DocumentRepository,
     private readonly extractor: PdfTextExtractor,
     @Inject(Embedder) private readonly embedder: Embedder | null,
+    private readonly usage: UsageService,
+    private readonly quota: ProviderQuotaTracker,
   ) {}
+
+  /**
+   * Order: cheap validation (nothing charged) → quotas (one transaction that
+   * charges the upload and creates the record) → paid ingestion. A failure
+   * after the charge is ours or the provider's, so the upload is refunded.
+   */
 
   async upload(
     uid: string,
@@ -100,6 +111,8 @@ export class DocumentsService {
         'Document processing is unavailable',
       );
     }
+    // Embeddings are known to be out of budget: don't parse, charge or call.
+    if (this.quota.searchExhausted) throw limitError('search_quota_exhausted');
 
     // Validate fully before storing anything.
     let pages: string[];
@@ -147,8 +160,10 @@ export class DocumentsService {
     };
     const embedder = this.embedder;
 
+    // 403 upload_limit_reached / 409 document_limit_reached; creates the record.
+    await this.usage.reserveUpload(uid, id, record);
+
     try {
-      await this.repository.create(uid, id, record);
       await this.repository.saveFile(record.storagePath, file.buffer);
       let embeddings: number[][];
       try {
@@ -177,6 +192,8 @@ export class DocumentsService {
       await this.repository
         .update(uid, id, { status: 'failed' })
         .catch(() => undefined);
+      // Every failure past validation is a server or provider problem.
+      await this.usage.refundUpload(uid);
       throw error instanceof HttpException
         ? error
         : new BadGatewayException('Document processing failed');

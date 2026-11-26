@@ -22,6 +22,8 @@ import {
   TEST_CONFIG,
   TEST_USER,
 } from '../../core/auth/testing/fake-auth-client';
+import { DemoUsage } from '../../core/usage/demo-usage';
+import { FakeDemoUsage } from '../../core/usage/testing/fake-demo-usage';
 import { FETCH } from './chat-api';
 import { MODEL_STORAGE } from './chat-models';
 import { chatRoute } from './chat-route';
@@ -86,6 +88,7 @@ describe('ChatSidebar (in the chat page)', () => {
         { provide: AuthClient, useValue: auth },
         { provide: FETCH, useValue: fake.fn },
         { provide: MODEL_STORAGE, useValue: new MemoryStorage() },
+        { provide: DemoUsage, useValue: new FakeDemoUsage() },
         { provide: CLOCK, useValue: () => NOW },
       ],
     });

@@ -14,8 +14,10 @@ import {
   TEST_CONFIG,
   TEST_USER,
 } from '../../core/auth/testing/fake-auth-client';
+import { DemoUsage } from '../../core/usage/demo-usage';
 import { FETCH } from './chat-api';
 import { ChatDocuments } from './chat-documents';
+import { ChatModels } from './chat-models';
 import { CHAT_SERVER_MESSAGE } from './chat-errors';
 import { ChatStore, type ConversationActivity } from './chat-store';
 import { FakeChatDocuments, LEASE, RULES } from './testing/fake-chat-documents';
@@ -55,10 +57,17 @@ describe('ChatStore', () => {
   let store: ChatStore;
   let navigate: ReturnType<typeof vi.spyOn>;
   let httpMock: HttpTestingController;
+  let usage: {
+    refresh: ReturnType<typeof vi.fn>;
+    noteLimit: ReturnType<typeof vi.fn>;
+  };
+  let models: { reload: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     fake = new FakeFetch();
     documents = new FakeChatDocuments();
+    usage = { refresh: vi.fn(), noteLimit: vi.fn() };
+    models = { reload: vi.fn() };
     const auth = new FakeAuthClient();
     TestBed.configureTestingModule({
       providers: [
@@ -69,6 +78,8 @@ describe('ChatStore', () => {
         { provide: AuthClient, useValue: auth },
         { provide: FETCH, useValue: fake.fn },
         { provide: ChatDocuments, useValue: documents },
+        { provide: DemoUsage, useValue: usage },
+        { provide: ChatModels, useValue: models },
       ],
     });
     TestBed.inject(AuthService).start(TEST_CONFIG);
@@ -249,16 +260,16 @@ describe('ChatStore', () => {
 
     fake.events({
       type: 'done',
-      modelId: 'gpt-6.2-astra',
+      modelId: 'gpt-6-luna',
       conversationId: 'c-saved',
       citations: [],
     });
-    expect(store.retry(assistant().id, 'gpt-6.2-astra')).toBe(true);
+    expect(store.retry(assistant().id, 'gpt-6-luna')).toBe(true);
     expect(assistant()).toMatchObject({ status: 'pending', content: '' });
     await vi.waitFor(() => expect(assistant().status).toBe('done'));
     expect(fake.body()).toEqual({
       message: 'When is rent due?',
-      modelId: 'gpt-6.2-astra',
+      modelId: 'gpt-6-luna',
       conversationId: 'c-saved',
     });
     // Retried in place: still one user turn and one answer.
@@ -283,6 +294,89 @@ describe('ChatStore', () => {
     store.retry(assistant().id);
     await vi.waitFor(() => expect(assistant().status).toBe('done'));
     expect(fake.body()).toEqual({ message: 'Hi', modelId: MODEL });
+  });
+
+  describe('demo limits', () => {
+    it('refreshes the usage once each question settles', async () => {
+      const body = fake.stream();
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+      expect(usage.refresh).not.toHaveBeenCalled();
+      body.push(
+        sse({
+          type: 'done',
+          modelId: MODEL,
+          conversationId: 'c1',
+          citations: [],
+        }),
+      );
+      await vi.waitFor(() => expect(store.streaming()).toBe(false));
+      expect(usage.refresh).toHaveBeenCalledTimes(1);
+
+      // Failed and stopped questions may have been counted too.
+      fake.json(500, { statusCode: 500, message: 'boom' });
+      store.send('Again', MODEL);
+      await vi.waitFor(() => expect(usage.refresh).toHaveBeenCalledTimes(2));
+      fake.stream();
+      store.send('Once more', MODEL);
+      await vi.waitFor(() => expect(fake.calls).toHaveLength(3));
+      store.stop();
+      await vi.waitFor(() => expect(usage.refresh).toHaveBeenCalledTimes(3));
+    });
+
+    it('shows the question limit and notes it', async () => {
+      fake.json(403, {
+        statusCode: 403,
+        code: 'question_limit_reached',
+        message: 'You’ve used all 30 demo questions.',
+      });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toBe('You’ve used all 30 demo questions.');
+      expect(usage.noteLimit).toHaveBeenCalledWith('question_limit_reached');
+    });
+
+    it('explains an exhausted model and reloads the model list', async () => {
+      fake.json(503, {
+        statusCode: 503,
+        code: 'model_quota_exhausted',
+        message: 'anthropic: credit balance too low',
+      });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toBe(
+        'This model has reached its demo limit for this month. Try another model.',
+      );
+      expect(models.reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles a model running out mid-stream (code on the error event)', async () => {
+      fake.events(
+        { type: 'start', conversationId: 'c1' },
+        {
+          type: 'error',
+          status: 503,
+          message: 'quota',
+          conversationId: 'c1',
+          code: 'model_quota_exhausted',
+        },
+      );
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toContain('demo limit for this month');
+      expect(models.reload).toHaveBeenCalledTimes(1);
+      expect(store.conversationId()).toBe('c1');
+    });
+
+    it('pauses questions when document search is out of budget', async () => {
+      fake.json(503, { statusCode: 503, code: 'search_quota_exhausted' });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toBe(
+        'Document search has reached its demo limit for this month, so uploads and questions are paused.',
+      );
+      expect(usage.noteLimit).toHaveBeenCalledWith('search_quota_exhausted');
+    });
   });
 
   it('refuses to send while streaming, when empty or too long', async () => {

@@ -1,14 +1,20 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { MAX_PDF_BYTES, PDF_MIME_TYPE } from '@ai-document-chatbot/shared';
+import {
+  LIMIT_MESSAGES,
+  SEARCH_QUOTA_MESSAGE,
+  limitErrorCode,
+} from '../../core/usage/limit-errors';
 
-/** `2.4 MB`, `340 KB`, `812 B` (binary units, matching the server's limit). */
+/** `2.4 MB`, `3 MB`, `340 KB`, `812 B` (binary units, matching the server's limit). */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 1024)
     return `${Math.max(0, bytes | 0)} B`;
   const kb = bytes / 1024;
   if (kb < 1024) return `${Math.round(kb)} KB`;
   const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  // `3 MB`, not `3.0 MB`.
+  return `${mb < 10 ? Number(mb.toFixed(1)) : Math.round(mb)} MB`;
 }
 
 export const MAX_PDF_SIZE_LABEL = formatBytes(MAX_PDF_BYTES);
@@ -45,16 +51,21 @@ function serverMessage(body: unknown): string | null {
 
 /**
  * Maps a failed upload to inline copy. 4xx: the server's message (already
- * user-friendly). 5xx / network: generic copy; never raw error details.
+ * user-friendly), else copy for its demo-limit `code` or status. 5xx /
+ * network: generic copy; never raw error details.
  */
 export function uploadErrorMessage(error: unknown): string {
   if (!(error instanceof HttpErrorResponse)) return SERVER_MESSAGE;
   const { status } = error;
   if (status === 0) return NETWORK_MESSAGE;
   if (status === 401) return 'Your session has expired. Sign in again.';
+  const code = limitErrorCode(error.error);
+  // Embeddings are out of their monthly demo budget (a 503).
+  if (code === 'search_quota_exhausted') return SEARCH_QUOTA_MESSAGE;
   if (status >= 400 && status < 500) {
     const message = serverMessage(error.error);
     if (message) return message;
+    if (code) return LIMIT_MESSAGES[code];
     switch (status) {
       case 413:
         return `This file is too large. PDFs can be up to ${MAX_PDF_SIZE_LABEL}.`;

@@ -10,7 +10,8 @@
   </header>
 
   <section class="mt-8" aria-label="Upload PDFs">
-    <app-document-upload (changed)="reload()" />
+    <app-demo-usage class="mb-3" />
+    <app-document-upload (changed)="onUploadChanged()" />
   </section>
 
   <section class="mt-10" aria-labelledby="documents-heading">
@@ -260,7 +261,20 @@
       <h2 hlmAlertDialogTitle>Delete this document?</h2>
       <p hlmAlertDialogDescription data-testid="delete-description">
         “{{ deleteTarget()?.name }}” and its search index will be removed. This
-        can’t be undone.
+        can’t be undone. @if (usage.usage()?.uploads; as uploads) { @if
+        (usage.uploadsExhausted()) {
+        <span
+          class="mt-3 block rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-left text-destructive"
+          data-testid="delete-upload-warning"
+          >You’ve used all {{ uploads.limit }} demo uploads. If you delete this
+          document, you won’t be able to upload another.</span
+        >
+        } @else {
+        <span class="mt-2 block" data-testid="delete-uploads-left"
+          >Uploads left: {{ uploads.limit - uploads.used }} of {{ uploads.limit
+          }}. Deleting doesn’t give one back.</span
+        >
+        } }
       </p>
     </hlm-alert-dialog-header>
     <hlm-alert-dialog-footer>

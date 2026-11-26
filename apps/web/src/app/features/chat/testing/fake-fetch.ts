@@ -30,9 +30,9 @@ export const CITATIONS: Citation[] = [
 export const MODELS: LlmModelsResponse = {
   models: [
     {
-      id: 'gpt-6.2-astra',
+      id: 'gpt-6-luna',
       provider: 'openai',
-      label: 'GPT-6.2 Astra',
+      label: 'GPT-6 Luna',
       available: true,
     },
     {
@@ -42,10 +42,11 @@ export const MODELS: LlmModelsResponse = {
       available: true,
     },
     {
-      id: 'gemini-4-argon',
+      id: 'gemini-3.8-flash',
       provider: 'gemini',
-      label: 'Gemini 4 Argon',
+      label: 'Gemini 3.8 Flash',
       available: false,
+      unavailableReason: 'not_configured',
     },
   ],
   defaultModelId: 'claude-haiku-5-5',

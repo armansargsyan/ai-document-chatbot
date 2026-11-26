@@ -12,8 +12,6 @@ import type { Response } from 'express';
 import type { AuthenticatedRequest } from '../auth/firebase-auth.guard';
 import { rateLimitKindOf, type RateLimitKind } from './rate-limit.decorator';
 
-const DAY_MS = 24 * 60 * 60_000;
-
 function wait(seconds: number): string {
   if (seconds < 90) return `${seconds} second${seconds === 1 ? '' : 's'}`;
   const minutes = Math.ceil(seconds / 60);
@@ -23,18 +21,11 @@ function wait(seconds: number): string {
 
 export function limitMessage(
   kind: RateLimitKind,
-  ttlMs: number,
   retryAfterSeconds: number,
 ): string {
-  const daily = ttlMs >= DAY_MS;
   const when = `Try again in ${wait(retryAfterSeconds)}.`;
-  if (kind === 'upload') {
-    return daily
-      ? `You've reached today's upload limit. ${when}`
-      : `You've reached the upload limit. ${when}`;
-  }
-  return daily
-    ? `You've reached today's message limit. ${when}`
+  return kind === 'upload'
+    ? `You've reached the upload limit. ${when}`
     : `You're sending messages too quickly. ${when}`;
 }
 
@@ -77,7 +68,7 @@ export class UserThrottlerGuard extends ThrottlerGuard {
       .getResponse<Response>()
       .setHeader('Retry-After', String(retryAfter));
     throw new ThrottlerException(
-      limitMessage(rateLimitKindOf(context) ?? 'chat', detail.ttl, retryAfter),
+      limitMessage(rateLimitKindOf(context) ?? 'chat', retryAfter),
     );
   }
 }

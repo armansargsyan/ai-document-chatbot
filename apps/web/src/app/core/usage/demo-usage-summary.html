@@ -1,0 +1,86 @@
+@if (layout() === 'panel') { @if (items().length) {
+<section
+  class="rounded-xl border border-border bg-muted/30 px-4 py-3 dark:bg-card/30"
+  [attr.aria-label]="summary()"
+  data-testid="demo-usage"
+>
+  <h2 class="text-xs font-semibold" aria-hidden="true">Demo usage</h2>
+  <ul class="mt-2 grid gap-2 sm:grid-cols-3 sm:gap-5" aria-hidden="true">
+    @for (i of items(); track i.key) {
+    <li
+      class="flex items-center gap-3 sm:block"
+      data-testid="usage-item"
+      [attr.data-key]="i.key"
+      [attr.data-full]="i.full || null"
+    >
+      <p class="w-32 shrink-0 text-xs text-muted-foreground sm:w-auto">
+        <span
+          class="font-semibold tabular-nums"
+          [class]="i.full ? 'text-destructive' : 'text-foreground'"
+          >{{ i.used }}</span
+        >
+        of <span class="tabular-nums">{{ i.limit }}</span> {{ i.noun }}
+      </p>
+      <div
+        class="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10 sm:mt-1.5"
+      >
+        <div
+          class="h-full rounded-full transition-[width] motion-reduce:transition-none"
+          [class]="i.full ? 'bg-destructive/80' : 'bg-foreground/55'"
+          [style.width.%]="i.percent"
+        ></div>
+      </div>
+    </li>
+    }
+  </ul>
+  <p class="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+    {{ rules }} Deleting a document frees a slot but doesn’t give back an
+    upload.
+  </p>
+</section>
+} @else if (demo.loading()) {
+<hlm-skeleton
+  class="h-[5.5rem] w-full rounded-xl"
+  data-testid="demo-usage-loading"
+/>
+} } @else if (items().length) {
+<p
+  class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
+  data-testid="demo-usage"
+>
+  <span class="sr-only">{{ summary() }}</span>
+  <span aria-hidden="true">Demo usage:</span>
+  @for (i of items(); track i.key) { @if (!$first) {
+  <span aria-hidden="true">·</span>
+  }
+  <span
+    class="whitespace-nowrap tabular-nums"
+    [class.font-medium]="i.full"
+    [class.text-foreground]="i.full"
+    aria-hidden="true"
+    data-testid="usage-item"
+    [attr.data-key]="i.key"
+    [attr.data-full]="i.full || null"
+    >{{ i.text }}</span
+  >
+  }
+  <button
+    type="button"
+    class="-my-1 inline-flex size-6 items-center justify-center rounded-full outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 pointer-coarse:size-8"
+    aria-label="About the demo limits"
+    title="About the demo limits"
+    data-testid="demo-rules-toggle"
+    [attr.popovertarget]="rulesId"
+  >
+    <ng-icon name="lucideInfo" size="14" aria-hidden="true" />
+  </button>
+</p>
+<div
+  popover
+  class="inset-auto bottom-24 left-1/2 m-0 w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-popover px-4 py-3 text-sm leading-relaxed text-popover-foreground shadow-lg"
+  [id]="rulesId"
+  data-testid="demo-rules"
+>
+  {{ rules }} Deleting a document frees a slot but doesn’t give back an upload.
+</div>
+}

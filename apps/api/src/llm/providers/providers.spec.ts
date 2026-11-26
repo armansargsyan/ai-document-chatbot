@@ -67,20 +67,46 @@ describe('OpenAiProvider', () => {
     );
   });
 
-  it('throws on an in-stream failure event', async () => {
+  it.each([
+    ['server_error', 502],
+    ['rate_limit_exceeded', 429],
+    // Accepted (possibly billed) and user-triggerable: must not be refundable.
+    ['invalid_prompt', 400],
+    [undefined, 400],
+  ])('maps an in-stream failure with code %s to %i', async (code, status) => {
     const create = vi
       .fn()
       .mockResolvedValue(
         events(
           { type: 'response.output_text.delta', delta: 'a' },
-          { type: 'response.failed' },
+          { type: 'response.failed', response: { error: { code } } },
         ),
       );
     const provider = new OpenAiProvider({
       responses: { create },
     } as unknown as OpenAI);
     await expect(collect(provider.streamChat(request))).rejects.toMatchObject({
-      status: 502,
+      status,
+    });
+  });
+});
+
+describe('OpenAiProvider quota errors in the stream', () => {
+  it.each([
+    [{ type: 'error', code: 'insufficient_quota', message: 'quota' }],
+    [
+      {
+        type: 'response.failed',
+        response: { error: { code: 'insufficient_quota' } },
+      },
+    ],
+  ])('keeps the vendor code on %j', async (event) => {
+    const create = vi.fn().mockResolvedValue(events(event));
+    const provider = new OpenAiProvider({
+      responses: { create },
+    } as unknown as OpenAI);
+    await expect(collect(provider.streamChat(request))).rejects.toMatchObject({
+      code: 'insufficient_quota',
     });
   });
 });

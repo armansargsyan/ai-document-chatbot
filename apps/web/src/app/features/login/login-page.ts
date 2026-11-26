@@ -8,13 +8,14 @@ import {
 import { Router } from '@angular/router';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
 import { AuthService } from '../../core/auth/auth.service';
+import { OwnerContactLinks } from '../../core/contact/owner-contact-links';
 import { AppLogo } from '../../core/layout/app-logo';
 import { safeReturnUrl } from '../../core/auth/return-url';
 import { ClientConfigService } from '../../core/config/client-config.service';
 
 @Component({
   selector: 'app-login-page',
-  imports: [HlmButtonImports, AppLogo],
+  imports: [HlmButtonImports, AppLogo, OwnerContactLinks],
   templateUrl: './login-page.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
