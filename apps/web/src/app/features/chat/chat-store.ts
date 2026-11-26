@@ -16,6 +16,7 @@ import {
   type LlmModelId,
 } from '@ai-document-chatbot/shared';
 import { ChatApi } from './chat-api';
+import { ChatDocuments, type DocumentScope } from './chat-documents';
 import { CHAT_SERVER_MESSAGE, ChatError } from './chat-errors';
 
 export type ChatEntryStatus =
@@ -37,7 +38,12 @@ export interface ChatEntry {
   /** User-facing reason, for `error`. */
   readonly error?: string;
   /** What an assistant turn answers: re-sent by Retry. */
-  readonly request?: { readonly message: string; readonly modelId: LlmModelId };
+  readonly request?: {
+    readonly message: string;
+    readonly modelId: LlmModelId;
+    /** The document searched; null for all documents. */
+    readonly scope: DocumentScope | null;
+  };
 }
 
 /**
@@ -57,6 +63,12 @@ export type HistoryState = 'none' | 'loading' | 'ready' | 'not-found' | 'error';
 
 let nextId = 0;
 const localId = (prefix: string) => `${prefix}-${++nextId}`;
+
+/** Added to a "document not found" error: Retry then drops the scope. */
+export const RETRY_ALL_DOCUMENTS_HINT = 'Retry will search all documents.';
+
+/** Ends a server message with a full stop, so a hint can follow it. */
+const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 function fromDetail(detail: ConversationDetail): ChatEntry[] {
   return detail.messages.map((m) => ({
@@ -78,6 +90,7 @@ function fromDetail(detail: ConversationDetail): ChatEntry[] {
 export class ChatStore {
   private readonly api = inject(ChatApi);
   private readonly router = inject(Router);
+  private readonly documents = inject(ChatDocuments);
 
   /** Conversation whose history is loaded from the api (not one created here). */
   private readonly historyId = signal<string | undefined>(undefined);
@@ -108,6 +121,18 @@ export class ChatStore {
         : 'error';
     }
     return this.history.hasValue() ? 'ready' : 'loading';
+  });
+
+  /** The document picked in "Search in"; null searches all of them. */
+  private readonly chosenScope = signal<string | null>(null);
+  /**
+   * Where the next message searches. Belongs to the conversation: kept across
+   * turns, reset when another one is shown. Falls back to all documents once
+   * the pick is no longer ready (deleted or failed).
+   */
+  readonly scope = computed<DocumentScope | null>(() => {
+    const doc = this.documents.find(this.chosenScope());
+    return doc ? { id: doc.id, name: doc.name } : null;
   });
 
   private readonly activeId = signal<string | null>(null);
@@ -160,11 +185,17 @@ export class ChatStore {
   private show(conversationId: string | undefined): void {
     this.cancel();
     this._announcement.set('');
+    this.chosenScope.set(null);
     this._conversationId.set(conversationId);
     this.historyId.set(conversationId);
     // Turns sent here belong to the previous conversation; the history
     // resource refills this once the new one loads.
     this._entries.set([]);
+  }
+
+  /** Picks the document to search; anything not ready means all documents. */
+  selectScope(documentId: string | null | undefined): void {
+    this.chosenScope.set(this.documents.find(documentId)?.id ?? null);
   }
 
   reloadHistory(): void {
@@ -184,6 +215,7 @@ export class ChatStore {
     ) {
       return false;
     }
+    const scope = this.scope();
     const assistantId = localId('assistant');
     this._entries.update((entries) => [
       ...entries,
@@ -202,29 +234,34 @@ export class ChatStore {
         status: 'pending',
         citations: [],
         modelId,
-        request: { message: text, modelId },
+        request: { message: text, modelId, scope },
       },
     ]);
-    void this.run(assistantId, text, modelId);
+    void this.run(assistantId, text, modelId, scope);
     return true;
   }
 
-  /** Re-sends a failed turn's message (in the conversation it was saved to, if any). */
+  /**
+   * Re-sends a failed turn's message (in the conversation it was saved to, if
+   * any) with the scope it was sent with; none once that document was found
+   * to be gone.
+   */
   retry(entryId: string, modelId?: LlmModelId | null): boolean {
     const entry = this._entries().find((e) => e.id === entryId);
     if (this.streaming() || entry?.status !== 'error' || !entry.request) {
       return false;
     }
     const target = modelId ?? entry.request.modelId;
+    const { message, scope } = entry.request;
     this.patch(entryId, {
       content: '',
       status: 'pending',
       error: undefined,
       citations: [],
       modelId: target,
-      request: { message: entry.request.message, modelId: target },
+      request: { message, modelId: target, scope },
     });
-    void this.run(entryId, entry.request.message, target);
+    void this.run(entryId, message, target, scope);
     return true;
   }
 
@@ -242,6 +279,7 @@ export class ChatStore {
     entryId: string,
     message: string,
     modelId: LlmModelId,
+    scope: DocumentScope | null,
   ): Promise<void> {
     const controller = new AbortController();
     this.controller = controller;
@@ -252,7 +290,12 @@ export class ChatStore {
     try {
       const conversationId = this._conversationId();
       const events = this.api.stream(
-        { message, modelId, ...(conversationId ? { conversationId } : {}) },
+        {
+          message,
+          modelId,
+          ...(conversationId ? { conversationId } : {}),
+          ...(scope ? { documentId: scope.id } : {}),
+        },
         controller.signal,
       );
       for await (const event of events) {
@@ -282,15 +325,33 @@ export class ChatStore {
         error instanceof ChatError
           ? error
           : new ChatError(500, CHAT_SERVER_MESSAGE);
-      if (chatError.status === 404) {
-        // The conversation was deleted (e.g. in another tab) after `start`:
-        // forget it so Retry starts a fresh one instead of 404ing forever.
+      const { code } = chatError;
+      let text = chatError.message;
+      if (code === 'document_not_found' || code === 'document_not_ready') {
+        // Refresh the picker so a gone document falls back to "All
+        // documents". The conversation is still fine.
+        this.documents.reload();
+        if (code === 'document_not_found' && scope) {
+          // It won't come back: Retry searches everything instead. A document
+          // that isn't ready keeps its scope; a later Retry can succeed.
+          text = `${sentence(text)} ${RETRY_ALL_DOCUMENTS_HINT}`;
+          this.patch(entryId, (e) => ({
+            request: e.request && { ...e.request, scope: null },
+          }));
+        }
+      } else if (
+        code === 'conversation_not_found' ||
+        // A mid-stream `error` event has no code.
+        (chatError.status === 404 && !code)
+      ) {
+        // The conversation was deleted (e.g. in another tab): forget it so
+        // Retry starts a fresh one instead of 404ing forever.
         this.forgetConversation();
       } else if (chatError.conversationId) {
         this.adopt(chatError.conversationId, message);
       }
-      this.patch(entryId, { status: 'error', error: chatError.message });
-      this._announcement.set(`Couldn’t answer: ${chatError.message}`);
+      this.patch(entryId, { status: 'error', error: text });
+      this._announcement.set(`Couldn’t answer: ${text}`);
     } finally {
       if (current()) {
         this.controller = null;

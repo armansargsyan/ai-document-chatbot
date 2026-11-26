@@ -23,13 +23,19 @@ import {
 } from '../llm/llm-provider';
 import { LlmService } from '../llm/llm.service';
 import {
+  DocumentRepository,
+  type DocumentRecord,
+} from '../documents/document.repository';
+import {
   RetrievalService,
+  type RetrieveOptions,
   type RetrievedChunk,
 } from '../retrieval/retrieval.service';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
+import { chatNotFound } from '../common/chat-errors';
 
 class FakeTokenVerifier extends TokenVerifier {
   async verify(token: string): Promise<AuthUser> {
@@ -57,6 +63,7 @@ const retrieved: RetrievedChunk[] = [
   {
     documentId: 'doc-1',
     documentName: 'Policy.pdf',
+    documentCreatedAt: '2026-11-24T09:00:00.000Z',
     page: 2,
     text: 'Refunds within 14 days.',
     distance: 0.1,
@@ -65,6 +72,48 @@ const retrieved: RetrievedChunk[] = [
 
 const CONV = 'abcdefghij0123456789';
 const NEW_CONV = 'newconversation00001';
+const DOC_READY = 'readydocument0000001';
+const DOC_BUSY = 'busydocument00000001';
+const DOC_FAILED = 'faileddocument000001';
+
+const record = (
+  id: string,
+  over: Partial<DocumentRecord>,
+): DocumentRecord & { id: string } => ({
+  id,
+  name: `${id}.pdf`,
+  sizeBytes: 1,
+  status: 'ready',
+  pageCount: 4,
+  chunkCount: 1,
+  createdAt: '2026-11-01T00:00:00.000Z',
+  storagePath: 'unused',
+  ...over,
+});
+
+/** user-1's documents, newest first (as DocumentRepository.list returns them). */
+class FakeDocuments {
+  listCalls = 0;
+  failList = false;
+  docs = [
+    record(DOC_BUSY, {
+      name: 'Busy.pdf',
+      status: 'processing',
+      createdAt: '2026-11-25T00:00:00.000Z',
+    }),
+    record(DOC_READY, {
+      name: 'Policy.pdf',
+      createdAt: '2026-11-24T09:00:00.000Z',
+      pageCount: 7,
+    }),
+    record(DOC_FAILED, { name: 'Broken.pdf', status: 'failed' }),
+  ];
+  async list(uid: string) {
+    this.listCalls++;
+    if (this.failList) throw new Error('firestore internal detail');
+    return uid === 'user-1' ? this.docs : [];
+  }
+}
 
 /** Records what the chat flow saves; knows one existing conversation for user-1. */
 class FakeConversations {
@@ -74,7 +123,7 @@ class FakeConversations {
   assistantSaveGone = false;
   async historyFor(uid: string, id: string) {
     if (uid !== 'user-1' || id !== CONV)
-      throw new NotFoundException('Conversation not found');
+      throw chatNotFound('Conversation not found', 'conversation_not_found');
     return this.history;
   }
   async recordUserMessage(
@@ -87,7 +136,7 @@ class FakeConversations {
   }
   async recordAssistantMessage(uid: string, id: string, answer: unknown) {
     if (this.assistantSaveGone)
-      throw new NotFoundException('Conversation not found');
+      throw chatNotFound('Conversation not found', 'conversation_not_found');
     if (this.failAssistantSave) throw new Error('firestore down');
     this.saved.push({ kind: 'assistant', uid, id, answer });
   }
@@ -99,8 +148,10 @@ class FakeRetrieval {
   /** When set, retrieval waits for this before returning. */
   gate: Promise<void> | null = null;
   calls: [string, string][] = [];
-  async retrieve(uid: string, question: string) {
+  options: (RetrieveOptions | undefined)[] = [];
+  async retrieve(uid: string, question: string, options?: RetrieveOptions) {
     this.calls.push([uid, question]);
+    this.options.push(options);
     if (this.gate) await this.gate;
     if (this.failWith) throw this.failWith;
     return retrieved;
@@ -125,6 +176,7 @@ describe('chat stream (integration)', () => {
   const provider = new ScriptedProvider();
   const retrieval = new FakeRetrieval();
   const conversations = new FakeConversations();
+  const documents = new FakeDocuments();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -135,6 +187,7 @@ describe('chat stream (integration)', () => {
         LlmService,
         { provide: LLM_PROVIDERS, useValue: [provider] },
         { provide: RetrievalService, useValue: retrieval },
+        { provide: DocumentRepository, useValue: documents },
         {
           provide: ConversationsService,
           useValue: {
@@ -164,6 +217,9 @@ describe('chat stream (integration)', () => {
   beforeEach(() => {
     provider.requests = [];
     retrieval.calls = [];
+    retrieval.options = [];
+    documents.listCalls = 0;
+    documents.failList = false;
     retrieval.available = true;
     retrieval.failWith = null;
     retrieval.gate = null;
@@ -251,6 +307,85 @@ describe('chat stream (integration)', () => {
     ]);
   });
 
+  it('lists the user’s ready documents in the prompt and searches all of them', async () => {
+    await readEvents(await post(question));
+    expect(retrieval.options).toEqual([{ documentId: undefined }]);
+    expect(documents.listCalls).toBe(1);
+    const prompt = provider.requests[0].messages[0].content;
+    expect(prompt).toContain(
+      '<document name="Policy.pdf" uploaded="2026-11-24" pages="7"/>',
+    );
+    expect(prompt).not.toContain('Busy.pdf');
+    expect(prompt).toContain('uploaded="2026-11-24" page="2"');
+  });
+
+  it('scopes retrieval to the chosen document and marks it in the prompt', async () => {
+    const res = await post({ ...question, documentId: DOC_READY });
+    expect(res.status).toBe(200);
+    await readEvents(res);
+    expect(retrieval.calls).toEqual([['user-1', 'How long do refunds take?']]);
+    expect(retrieval.options).toEqual([{ documentId: DOC_READY }]);
+    expect(provider.requests[0].messages[0].content).toContain(
+      '<document name="Policy.pdf" uploaded="2026-11-24" pages="7" searched="true"/>',
+    );
+  });
+
+  it.each([
+    [
+      'an unknown (or another user’s) document',
+      'unknowndocument00001',
+      404,
+      'Document not found',
+      'document_not_found',
+    ],
+    [
+      'a processing document',
+      DOC_BUSY,
+      409,
+      "That document isn't ready yet",
+      'document_not_ready',
+    ],
+    ['a failed document', DOC_FAILED, 409, 'couldn', 'document_not_ready'],
+  ])(
+    'returns a JSON error for %s before any paid call',
+    async (_label, documentId, status, message, code) => {
+      const res = await post({ ...question, documentId });
+      expect(res.status).toBe(status);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ statusCode: status, code });
+      expect(body['message']).toContain(message);
+      expect(retrieval.calls).toHaveLength(0);
+      expect(provider.requests).toHaveLength(0);
+      expect(conversations.saved).toHaveLength(0);
+    },
+  );
+
+  it('passes a 409 from retrieval through (document changed after the list)', async () => {
+    retrieval.failWith = new ConflictException("That document isn't ready yet");
+    const res = await post({ ...question, documentId: DOC_READY });
+    expect(res.status).toBe(409);
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  it('checks conversation ownership before the document scope', async () => {
+    const res = await post({
+      ...question,
+      conversationId: 'zzzzzzzzzz0123456789',
+      documentId: 'unknowndocument00001',
+    });
+    expect(res.status).toBe(404);
+    expect(documents.listCalls).toBe(0);
+  });
+
+  it('maps a document list failure to 503 without leaking details', async () => {
+    documents.failList = true;
+    const res = await post(question);
+    expect(res.status).toBe(503);
+    expect(await res.text()).not.toContain('firestore internal detail');
+    expect(retrieval.calls).toHaveLength(0);
+  });
+
   it('starts a new conversation and returns its id', async () => {
     const events = await readEvents(await post(question));
     expect(events.at(-1)).toMatchObject({
@@ -282,6 +417,12 @@ describe('chat stream (integration)', () => {
       conversationId: 'zzzzzzzzzz0123456789',
     });
     expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      statusCode: 404,
+      error: 'Not Found',
+      message: 'Conversation not found',
+      code: 'conversation_not_found',
+    });
     expect(retrieval.calls).toHaveLength(0);
     expect(provider.requests).toHaveLength(0);
     expect(conversations.saved).toHaveLength(0);

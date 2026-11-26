@@ -130,7 +130,7 @@
           page it came from.
         </p>
 
-        @if (needsDocuments()) {
+        @if (documents.needsDocuments()) {
         <div
           class="mx-auto mt-7 flex max-w-md flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-muted/40 px-5 py-4 text-sm sm:flex-row sm:text-left"
           data-testid="upload-cta"
@@ -303,7 +303,16 @@
             </ul>
             } @if (modelLabel(entry); as label) {
             <p class="mt-2 text-xs text-muted-foreground">{{ label }}</p>
-            } }
+            } } @if ((entry.status === 'done' || entry.status === 'stopped') &&
+            entry.request?.scope; as scope) {
+            <p
+              class="mt-1 truncate text-xs text-muted-foreground"
+              data-testid="scope-label"
+              [attr.title]="scope.name"
+            >
+              Searched: {{ scope.name }}
+            </p>
+            }
           </div>
         </article>
         } }
@@ -382,41 +391,80 @@
       (send)="send($event)"
       (stop)="stop()"
     >
-      @if (models.loading()) {
-      <hlm-skeleton class="h-8 w-36 rounded-full pointer-coarse:h-10" />
-      } @else if (models.groups().length) {
-      <label for="chat-model" class="sr-only">Model</label>
-      <hlm-native-select
-        selectId="chat-model"
-        size="sm"
-        class="max-w-full"
-        selectClass="max-w-[15rem] rounded-full border-transparent bg-muted/70 font-medium shadow-none hover:bg-muted dark:bg-muted/70 dark:hover:bg-muted"
-        data-testid="model-select"
-        [value]="models.selectedId() ?? ''"
-        [disabled]="store.streaming() || models.noneAvailable()"
-        (valueChange)="models.select($event)"
-      >
-        @if (!models.selectedId()) {
-        <option hlmNativeSelectOption value="" disabled>
-          No model available
-        </option>
-        } @for (group of models.groups(); track group.provider) {
-        <optgroup hlmNativeSelectOptGroup [label]="group.label">
-          @for (m of group.models; track m.id) {
-          <option
-            hlmNativeSelectOption
-            [value]="m.id"
-            [disabled]="!m.available"
-            [selected]="m.id === models.selectedId()"
-            [attr.title]="m.available ? null : 'No API key is configured for ' + group.label"
-          >
-            {{ m.label }}{{ m.available ? '' : ' (unavailable)' }}
+      <!-- Wraps "Search in" to its own line when both don't fit (phones). -->
+      <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+        @if (models.loading()) {
+        <hlm-skeleton class="h-8 w-36 rounded-full pointer-coarse:h-10" />
+        } @else if (models.groups().length) {
+        <label for="chat-model" class="sr-only">Model</label>
+        <hlm-native-select
+          selectId="chat-model"
+          size="sm"
+          class="min-w-0 max-w-full shrink"
+          selectClass="max-w-[15rem] truncate field-sizing-content rounded-full border-transparent bg-muted/70 font-medium shadow-none hover:bg-muted dark:bg-muted/70 dark:hover:bg-muted"
+          data-testid="model-select"
+          [value]="models.selectedId() ?? ''"
+          [disabled]="store.streaming() || models.noneAvailable()"
+          (valueChange)="models.select($event)"
+        >
+          @if (!models.selectedId()) {
+          <option hlmNativeSelectOption value="" disabled>
+            No model available
           </option>
+          } @for (group of models.groups(); track group.provider) {
+          <optgroup hlmNativeSelectOptGroup [label]="group.label">
+            @for (m of group.models; track m.id) {
+            <option
+              hlmNativeSelectOption
+              [value]="m.id"
+              [disabled]="!m.available"
+              [selected]="m.id === models.selectedId()"
+              [attr.title]="m.available ? null : 'No API key is configured for ' + group.label"
+            >
+              {{ m.label }}{{ m.available ? '' : ' (unavailable)' }}
+            </option>
+            }
+          </optgroup>
           }
-        </optgroup>
+        </hlm-native-select>
+        } @if (documents.ready().length) {
+        <div
+          class="flex max-w-full min-w-0 items-center gap-1.5"
+          data-testid="scope-picker"
+        >
+          <label
+            for="chat-scope"
+            class="shrink-0 ps-1 text-xs font-medium text-muted-foreground"
+            >Search in</label
+          >
+          <hlm-native-select
+            selectId="chat-scope"
+            size="sm"
+            class="min-w-0 max-w-full shrink"
+            selectClass="max-w-[15rem] truncate field-sizing-content sm:max-w-[20rem] rounded-full border-transparent bg-muted/70 font-medium shadow-none hover:bg-muted dark:bg-muted/70 dark:hover:bg-muted"
+            data-testid="scope-select"
+            [value]="store.scope()?.id ?? ''"
+            [disabled]="store.streaming()"
+            (valueChange)="store.selectScope($event)"
+          >
+            <option hlmNativeSelectOption value="" [selected]="!store.scope()">
+              All documents
+            </option>
+            @for (d of documents.ready(); track d.id) {
+            <option
+              hlmNativeSelectOption
+              [value]="d.id"
+              [selected]="d.id === store.scope()?.id"
+              [attr.title]="d.name"
+              [attr.aria-label]="d.name"
+            >
+              {{ shortName(d.name) }}
+            </option>
+            }
+          </hlm-native-select>
+        </div>
         }
-      </hlm-native-select>
-      }
+      </div>
     </app-chat-composer>
   </div>
 </main>

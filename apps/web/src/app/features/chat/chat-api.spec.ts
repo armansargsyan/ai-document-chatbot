@@ -239,13 +239,25 @@ describe('ChatApi', () => {
       expect((error as ChatError).message).toContain('42 seconds');
     });
 
-    it('shows the server message for 404', async () => {
-      fake.json(404, { statusCode: 404, message: 'Conversation not found' });
+    it('shows the server message for 404, with its code', async () => {
+      fake.json(404, {
+        statusCode: 404,
+        message: 'Conversation not found',
+        code: 'conversation_not_found',
+      });
       const { error } = await collect();
       expect(error).toMatchObject({
         status: 404,
         message: 'Conversation not found',
+        code: 'conversation_not_found',
       });
+    });
+
+    it('ignores an unknown or missing code', async () => {
+      fake.json(409, { statusCode: 409, message: 'Busy', code: 'something' });
+      expect((await collect()).error).toMatchObject({ code: undefined });
+      fake.json(409, { statusCode: 409, message: 'Busy' });
+      expect((await collect()).error).toMatchObject({ code: undefined });
     });
 
     it('uses friendly copy for 503, not the server text', async () => {

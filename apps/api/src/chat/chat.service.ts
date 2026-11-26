@@ -1,4 +1,5 @@
 import {
+  HttpException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -10,13 +11,17 @@ import type {
   LlmModelId,
 } from '@ai-document-chatbot/shared';
 import { ConversationsService } from '../conversations/conversations.service';
+import { DocumentRepository } from '../documents/document.repository';
 import {
   LlmRequestAbortedError,
   describeProviderError,
   toHttpException,
 } from '../llm/llm-errors';
 import { LlmService } from '../llm/llm.service';
-import { RetrievalService } from '../retrieval/retrieval.service';
+import {
+  RetrievalService,
+  assertSearchable,
+} from '../retrieval/retrieval.service';
 import { SYSTEM_PROMPT, buildUserPrompt, toCitations } from './prompt';
 
 /** A ready-to-stream answer: retrieval is done, the model call starts on iteration. */
@@ -66,12 +71,15 @@ export class ChatService {
     private readonly llm: LlmService,
     private readonly retrieval: RetrievalService,
     private readonly conversations: ConversationsService,
+    private readonly documents: DocumentRepository,
   ) {}
 
   /**
-   * Everything that can fail before the first token: model availability and
-   * retrieval. Throws HttpExceptions, so the controller can still answer with
-   * a normal HTTP error before the SSE stream starts.
+   * Everything that can fail before the first token, in order: model
+   * availability, conversation ownership (404), the scoped document (404/409)
+   * and the document list, then retrieval. Throws HttpExceptions, so the
+   * controller can still answer with a normal HTTP error before the SSE
+   * stream starts. Nothing paid (embedding, model) runs before these checks.
    */
   async prepare(
     uid: string,
@@ -88,10 +96,29 @@ export class ChatService {
       ? await this.conversations.history(uid, request.conversationId)
       : [];
 
+    // One read serves both the prompt's document list and the scope check.
+    let documents;
+    try {
+      documents = await this.documents.list(uid);
+    } catch (error) {
+      this.logger.warn(
+        `Listing documents failed: ${describeProviderError(error)}`,
+      );
+      throw new ServiceUnavailableException('Document search is unavailable');
+    }
+    const { documentId } = request;
+    if (documentId !== undefined) {
+      assertSearchable(documents.find((doc) => doc.id === documentId));
+    }
+
     let chunks;
     try {
-      chunks = await this.retrieval.retrieve(uid, request.message);
+      chunks = await this.retrieval.retrieve(uid, request.message, {
+        documentId,
+      });
     } catch (error) {
+      // 404/409: the scoped document went away or changed since the list.
+      if (error instanceof HttpException) throw error;
       this.logger.warn(`Retrieval failed: ${describeProviderError(error)}`);
       // Only a rate limit is worth surfacing as-is; anything else (bad embedding
       // key, Firestore errors such as a missing vector index) means search is down.
@@ -117,7 +144,13 @@ export class ChatService {
         system: SYSTEM_PROMPT,
         messages: [
           ...normalizeHistory(history),
-          { role: 'user', content: buildUserPrompt(request.message, chunks) },
+          {
+            role: 'user',
+            content: buildUserPrompt(request.message, chunks, {
+              documents,
+              scopedDocumentId: documentId,
+            }),
+          },
         ],
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         signal,

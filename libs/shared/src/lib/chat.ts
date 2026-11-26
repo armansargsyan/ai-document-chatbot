@@ -8,6 +8,11 @@ export interface ChatRequest {
   modelId: LlmModelId;
   /** Existing conversation to continue (20-character id); omit to start a new one. */
   conversationId?: string;
+  /**
+   * Search only this document (20-character id, must be `ready`); omit to
+   * search all of the user's documents. Unknown/other user's → 404, not ready → 409.
+   */
+  documentId?: string;
 }
 
 /** A retrieved excerpt the answer may cite as `[number]`. */
@@ -50,3 +55,10 @@ export type ChatStreamEvent =
        */
       conversationId?: string;
     };
+
+/**
+ * Machine-readable `code` on JSON errors from `POST /api/chat/stream` (body:
+ * `{ statusCode, message, code? }`), so clients don't branch on message text.
+ */
+export type ChatErrorCode =
+  'conversation_not_found' | 'document_not_found' | 'document_not_ready';

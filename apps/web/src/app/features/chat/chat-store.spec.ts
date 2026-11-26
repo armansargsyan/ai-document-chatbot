@@ -15,8 +15,10 @@ import {
   TEST_USER,
 } from '../../core/auth/testing/fake-auth-client';
 import { FETCH } from './chat-api';
+import { ChatDocuments } from './chat-documents';
 import { CHAT_SERVER_MESSAGE } from './chat-errors';
 import { ChatStore, type ConversationActivity } from './chat-store';
+import { FakeChatDocuments, LEASE, RULES } from './testing/fake-chat-documents';
 import { CITATIONS, FakeFetch, sse } from './testing/fake-fetch';
 
 const MODEL = 'claude-haiku-5-5' as const;
@@ -49,12 +51,14 @@ const DETAIL: ConversationDetail = {
 
 describe('ChatStore', () => {
   let fake: FakeFetch;
+  let documents: FakeChatDocuments;
   let store: ChatStore;
   let navigate: ReturnType<typeof vi.spyOn>;
   let httpMock: HttpTestingController;
 
   beforeEach(() => {
     fake = new FakeFetch();
+    documents = new FakeChatDocuments();
     const auth = new FakeAuthClient();
     TestBed.configureTestingModule({
       providers: [
@@ -64,6 +68,7 @@ describe('ChatStore', () => {
         provideHttpClientTesting(),
         { provide: AuthClient, useValue: auth },
         { provide: FETCH, useValue: fake.fn },
+        { provide: ChatDocuments, useValue: documents },
       ],
     });
     TestBed.inject(AuthService).start(TEST_CONFIG);
@@ -398,5 +403,164 @@ describe('ChatStore', () => {
       });
       expect(Number.isNaN(Date.parse(a.at))).toBe(false);
     }
+  });
+  describe('document scope', () => {
+    const done = (conversationId = 'c-new') =>
+      fake.events({
+        type: 'done',
+        modelId: MODEL,
+        conversationId,
+        citations: [],
+      });
+
+    it('searches all documents by default: no documentId is sent', async () => {
+      expect(store.scope()).toBeNull();
+      done();
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(store.streaming()).toBe(false));
+      expect(fake.body()).toEqual({ message: 'Hi', modelId: MODEL });
+      expect(assistant().request?.scope).toBeNull();
+    });
+
+    it('sends the picked document and keeps it for the next turn', async () => {
+      store.selectScope(LEASE.id);
+      expect(store.scope()).toEqual({ id: LEASE.id, name: 'Lease.pdf' });
+      done();
+      store.send('When is rent due?', MODEL);
+      await vi.waitFor(() => expect(store.streaming()).toBe(false));
+      expect(fake.body()).toEqual({
+        message: 'When is rent due?',
+        modelId: MODEL,
+        documentId: LEASE.id,
+      });
+      expect(assistant().request?.scope).toEqual({
+        id: LEASE.id,
+        name: 'Lease.pdf',
+      });
+
+      // The route then reports the new id: same conversation, scope kept.
+      store.open('c-new');
+      done();
+      store.send('And the deposit?', MODEL);
+      await vi.waitFor(() => expect(store.streaming()).toBe(false));
+      expect(fake.body()).toEqual({
+        message: 'And the deposit?',
+        modelId: MODEL,
+        conversationId: 'c-new',
+        documentId: LEASE.id,
+      });
+
+      store.selectScope('');
+      expect(store.scope()).toBeNull();
+    });
+
+    it('ignores a pick that is not a ready document', () => {
+      store.selectScope('doc-unknown');
+      expect(store.scope()).toBeNull();
+    });
+
+    it('resets to all documents on New chat and when opening another conversation', () => {
+      store.selectScope(RULES.id);
+      store.reset();
+      expect(store.scope()).toBeNull();
+
+      store.selectScope(RULES.id);
+      store.open('c-old');
+      expect(store.scope()).toBeNull();
+      TestBed.tick();
+      httpMock.expectOne('/api/conversations/c-old').flush(DETAIL);
+    });
+
+    it('falls back to all documents when the picked one is no longer ready', () => {
+      store.selectScope(LEASE.id);
+      documents.ready.set([RULES]); // deleted, or failed
+      expect(store.scope()).toBeNull();
+    });
+
+    it('retries with the scope the turn was sent with', async () => {
+      store.selectScope(LEASE.id);
+      fake.json(500, { statusCode: 500, message: 'boom' });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+
+      store.selectScope(RULES.id); // a later pick is for new messages
+      done();
+      expect(store.retry(assistant().id)).toBe(true);
+      await vi.waitFor(() => expect(assistant().status).toBe('done'));
+      expect(fake.body()).toEqual({
+        message: 'Hi',
+        modelId: MODEL,
+        documentId: LEASE.id,
+      });
+    });
+
+    it('shows a 404 for the document inline, keeps the conversation and refreshes the list', async () => {
+      store.open('c-old');
+      TestBed.tick();
+      httpMock.expectOne('/api/conversations/c-old').flush(DETAIL);
+      await settle();
+      store.selectScope(LEASE.id);
+      fake.json(404, {
+        statusCode: 404,
+        message: 'Document not found',
+        code: 'document_not_found',
+      });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toBe(
+        'Document not found. Retry will search all documents.',
+      );
+      expect(store.conversationId()).toBe('c-old');
+      expect(navigate).not.toHaveBeenCalled();
+      expect(documents.reloads).toBe(1);
+
+      // The document won't come back: Retry searches all documents.
+      expect(assistant().request?.scope).toBeNull();
+      done('c-old');
+      expect(store.retry(assistant().id)).toBe(true);
+      await vi.waitFor(() => expect(assistant().status).toBe('done'));
+      expect(fake.body()).toEqual({
+        message: 'Hi',
+        modelId: MODEL,
+        conversationId: 'c-old',
+      });
+    });
+
+    it('shows a 409 (not ready) inline, refreshes the list and keeps the scope for Retry', async () => {
+      const message =
+        "That document isn't ready yet; try again once it has finished processing";
+      store.selectScope(LEASE.id);
+      fake.json(409, { statusCode: 409, message, code: 'document_not_ready' });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(assistant().error).toBe(message);
+      expect(documents.reloads).toBe(1);
+
+      done();
+      store.retry(assistant().id);
+      await vi.waitFor(() => expect(assistant().status).toBe('done'));
+      expect(fake.body()).toMatchObject({ documentId: LEASE.id });
+    });
+
+    it('still forgets a deleted conversation on a scoped 404 about it', async () => {
+      store.open('c-old');
+      TestBed.tick();
+      httpMock.expectOne('/api/conversations/c-old').flush(DETAIL);
+      await settle();
+      store.selectScope(LEASE.id);
+      fake.json(404, {
+        statusCode: 404,
+        message: 'Conversation not found',
+        code: 'conversation_not_found',
+      });
+      store.send('Hi', MODEL);
+      await vi.waitFor(() => expect(assistant().status).toBe('error'));
+      expect(store.conversationId()).toBeUndefined();
+      expect(assistant().request?.scope).toEqual({
+        id: LEASE.id,
+        name: 'Lease.pdf',
+      });
+      expect(documents.reloads).toBe(0);
+    });
   });
 });

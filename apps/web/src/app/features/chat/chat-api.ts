@@ -6,6 +6,7 @@ import {
   CHAT_NETWORK_MESSAGE,
   ChatError,
   chatErrorMessage,
+  serverCode,
   serverMessage,
 } from './chat-errors';
 import { SseParser, toChatStreamEvent } from './sse-parser';
@@ -79,6 +80,8 @@ export class ChatApi {
           serverMessage(body),
           retryAfterSeconds(response),
         ),
+        undefined,
+        serverCode(body),
       );
     }
 

@@ -91,6 +91,17 @@ describe('ConversationsService', () => {
     },
   );
 
+  it('tags the 404 with a machine-readable code', async () => {
+    ctx.repository.get.mockResolvedValueOnce(null);
+    const error = await ctx.service.history(UID, ID).catch((e: unknown) => e);
+    expect((error as HttpException).getResponse()).toEqual({
+      statusCode: 404,
+      error: 'Not Found',
+      message: 'Conversation not found',
+      code: 'conversation_not_found',
+    });
+  });
+
   it('renames and returns the updated summary', async () => {
     expect(await ctx.service.rename(UID, ID, 'New title')).toMatchObject({
       id: ID,
