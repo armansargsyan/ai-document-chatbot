@@ -43,3 +43,48 @@ Project: `ai-doc-chatbot-demo` (default in `.firebaserc`). Uses Authentication (
 - **Deploy rules/indexes**: `firebase deploy --only firestore,storage`.
 
 The project is on the Blaze plan (Cloud Storage requires it) with a $3/month budget alert. The default bucket `ai-doc-chatbot-demo.firebasestorage.app` is in `us-central1`, inside the Cloud Storage free tier.
+
+## Deploy
+
+Live: **https://ai-doc-chatbot-demo.web.app**
+
+```
+Browser ─► Firebase Hosting ─┬─ /        → Angular app (dist/apps/web/browser)
+                             └─ /api/**  → Cloud Run "api" (us-central1) ─► Firestore · Storage · Auth · LLM APIs
+```
+
+- **api**: Cloud Run service `api` in `us-central1`, built from `apps/api/Dockerfile` (Node 24) on Cloud Build. Runs as the `api-runtime` service account, which only has Firestore access (`roles/datastore.user`) and object access on the default bucket. Max 2 instances (caps cost and keeps the in-memory rate limits meaningful), scales to zero, 1 GiB, 300 s timeout.
+- **web**: Firebase Hosting. `/api/**` is rewritten to Cloud Run (same origin, no CORS). Hashed JS/CSS are cached for a year; HTML is `no-cache`.
+- **Config**: the public Firebase web config is set as Cloud Run env vars by the deploy script. LLM keys come from **Secret Manager**; never from files.
+
+Note: requests through Hosting are limited to **60 s**. Typical answers and PDFs finish well within that; very large uploads could hit it.
+
+### Redeploy
+
+```sh
+scripts/deploy.sh          # api + web
+scripts/deploy.sh api      # Cloud Run only
+scripts/deploy.sh web      # Hosting only
+firebase deploy --only firestore,storage   # rules / indexes
+```
+
+Needs `gcloud` and `firebase` logged in with access to the project. The script always passes `--project ai-doc-chatbot-demo`.
+
+### LLM keys (Secret Manager)
+
+Create each secret in **your own terminal** (the key is read without echoing, so it never lands in shell history or logs):
+
+```sh
+P=ai-doc-chatbot-demo
+for NAME in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY; do
+  printf '%s (Enter to skip): ' "$NAME"; read -rs KEY; echo
+  [ -z "$KEY" ] && continue
+  printf '%s' "$KEY" | gcloud secrets create "$NAME" --data-file=- --replication-policy=automatic --project "$P"
+  gcloud secrets add-iam-policy-binding "$NAME" --project "$P" \
+    --member "serviceAccount:api-runtime@$P.iam.gserviceaccount.com" --role roles/secretmanager.secretAccessor
+  unset KEY
+done
+scripts/deploy.sh api   # attaches the secrets that exist
+```
+
+`OPENAI_API_KEY` is required for PDF ingestion (embeddings); at least one of the three enables chat. Set a monthly spending limit in each provider's dashboard. To rotate a key: `printf '%s' "$KEY" | gcloud secrets versions add NAME --data-file=-` then `scripts/deploy.sh api`.
