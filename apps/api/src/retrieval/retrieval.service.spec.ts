@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { Firestore } from 'firebase-admin/firestore';
 import type {
   DocumentRecord,
@@ -16,9 +17,9 @@ type Hit = { documentId: string; page: number; text: string; distance: number };
 
 /** Fake Firestore query chain: collectionGroup().where().findNearest().get(). */
 function fakeDb(hits: Hit[]) {
-  const calls: Record<string, unknown[]> = {};
+  const calls: Record<string, unknown[]> = { where: [] };
   const query = {
-    where: vi.fn((...args: unknown[]) => ((calls.where = args), query)),
+    where: vi.fn((...args: unknown[]) => (calls.where.push(args), query)),
     findNearest: vi.fn(
       (options: unknown) => ((calls.findNearest = [options]), query),
     ),
@@ -57,14 +58,20 @@ describe('RetrievalService', () => {
     const service = new RetrievalService(
       db,
       embedder,
-      repo({ a: { status: 'ready', name: 'A.pdf' } }),
+      repo({
+        a: {
+          status: 'ready',
+          name: 'A.pdf',
+          createdAt: '2026-11-20T10:00:00.000Z',
+        },
+      }),
     );
 
     const result = await service.retrieve('user-1', 'question?');
 
     expect(embedder.embed).toHaveBeenCalledWith(['question?']);
     expect(calls.collectionGroup).toEqual(['chunks']);
-    expect(calls.where).toEqual(['uid', '==', 'user-1']);
+    expect(calls.where).toEqual([['uid', '==', 'user-1']]);
     expect(calls.findNearest).toEqual([
       expect.objectContaining({
         vectorField: 'embedding',
@@ -77,6 +84,7 @@ describe('RetrievalService', () => {
       {
         documentId: 'a',
         documentName: 'A.pdf',
+        documentCreatedAt: '2026-11-20T10:00:00.000Z',
         page: 1,
         text: 'text from a p1',
         distance: 0.1,
@@ -117,8 +125,86 @@ describe('RetrievalService', () => {
       new FakeEmbedder(),
       repo({ a: { status: 'ready', name: 'A.pdf' } }),
     );
-    const result = await service.retrieve('user-1', 'q', 3);
+    const result = await service.retrieve('user-1', 'q', { topK: 3 });
     expect(result.map((r) => r.page)).toEqual([1, 2, 3]);
+  });
+
+  describe('scoped to one document', () => {
+    const DOC = 'abcdefghij0123456789';
+
+    it('adds a documentId filter next to the uid prefilter', async () => {
+      const { db, calls } = fakeDb([hit(DOC), hit(DOC, 2)]);
+      const documents = repo({ [DOC]: { status: 'ready', name: 'D.pdf' } });
+      const service = new RetrievalService(db, new FakeEmbedder(), documents);
+
+      const result = await service.retrieve('user-1', 'q', {
+        documentId: DOC,
+      });
+
+      expect(calls.where).toEqual([
+        ['uid', '==', 'user-1'],
+        ['documentId', '==', DOC],
+      ]);
+      expect(documents.get).toHaveBeenCalledWith('user-1', DOC);
+      // The checked record is reused for the ready filter.
+      expect(documents.get).toHaveBeenCalledTimes(1);
+      expect(result.map((r) => r.documentName)).toEqual(['D.pdf', 'D.pdf']);
+    });
+
+    it.each([
+      [
+        'an unknown (or another user’s) document',
+        null,
+        NotFoundException,
+        'document_not_found',
+      ],
+      [
+        'a processing document',
+        { status: 'processing' },
+        ConflictException,
+        'document_not_ready',
+      ],
+      [
+        'a failed document',
+        { status: 'failed' },
+        ConflictException,
+        'document_not_ready',
+      ],
+    ] as const)(
+      'rejects %s before embedding the question',
+      async (_label, record, expected, code) => {
+        const { db } = fakeDb([hit(DOC)]);
+        const embedder = new FakeEmbedder();
+        const service = new RetrievalService(
+          db,
+          embedder,
+          repo({ [DOC]: record as Partial<DocumentRecord> | null }),
+        );
+        await expect(
+          service.retrieve('user-1', 'q', { documentId: DOC }),
+        ).rejects.toBeInstanceOf(expected);
+        const error = await service
+          .retrieve('user-1', 'q', { documentId: DOC })
+          .catch((e: unknown) => e as NotFoundException | ConflictException);
+        expect(error.getResponse()).toMatchObject({
+          statusCode: expected === NotFoundException ? 404 : 409,
+          code,
+        });
+        expect(embedder.embed).not.toHaveBeenCalled();
+        expect(db.collectionGroup).not.toHaveBeenCalled();
+      },
+    );
+
+    it('uses a friendly message for a document that is not ready', async () => {
+      const service = new RetrievalService(
+        fakeDb([]).db,
+        new FakeEmbedder(),
+        repo({ [DOC]: { status: 'processing' } }),
+      );
+      await expect(
+        service.retrieve('user-1', 'q', { documentId: DOC }),
+      ).rejects.toThrow("That document isn't ready yet");
+    });
   });
 
   it('reports unavailable without an embedder', async () => {

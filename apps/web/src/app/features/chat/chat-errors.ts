@@ -1,3 +1,5 @@
+import type { ChatErrorCode } from '@ai-document-chatbot/shared';
+
 export const CHAT_NETWORK_MESSAGE =
   'Couldn’t reach the server. Check your connection and try again.';
 export const CHAT_SERVER_MESSAGE =
@@ -16,10 +18,27 @@ export class ChatError extends Error {
     message: string,
     /** Set when the turn was saved to a conversation anyway (retry continues it). */
     readonly conversationId?: string,
+    /** The api's machine-readable reason, when it sent one. */
+    readonly code?: ChatErrorCode,
   ) {
     super(message);
     this.name = 'ChatError';
   }
+}
+
+const CHAT_ERROR_CODES: readonly ChatErrorCode[] = [
+  'conversation_not_found',
+  'document_not_found',
+  'document_not_ready',
+];
+
+/** The api's `{ code }` (see {@link ChatErrorCode}), if it's a known one. */
+export function serverCode(body: unknown): ChatErrorCode | undefined {
+  if (typeof body !== 'object' || body === null || !('code' in body)) {
+    return undefined;
+  }
+  const { code } = body as { code: unknown };
+  return CHAT_ERROR_CODES.find((c) => c === code);
 }
 
 /** The api's `{ message }` (Nest error body), if it's a usable string. */

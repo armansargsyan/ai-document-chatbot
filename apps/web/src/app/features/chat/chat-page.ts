@@ -15,7 +15,6 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { httpResource } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucidePanelLeft, lucidePlus } from '@ng-icons/lucide';
@@ -23,7 +22,6 @@ import {
   getLlmModel,
   isLlmModelId,
   type Citation,
-  type ListDocumentsResponse,
 } from '@ai-document-chatbot/shared';
 import { HlmButtonImports } from '@spartan-ng/helm/button';
 import { HlmNativeSelectImports } from '@spartan-ng/helm/native-select';
@@ -31,6 +29,7 @@ import { HlmSheetImports } from '@spartan-ng/helm/sheet';
 import { HlmSkeletonImports } from '@spartan-ng/helm/skeleton';
 import { AppLogo } from '../../core/layout/app-logo';
 import { ChatComposer } from './chat-composer';
+import { ChatDocuments } from './chat-documents';
 import { ChatMarkdown } from './chat-markdown';
 import { ChatModels } from './chat-models';
 import { ChatSidebar, opensElsewhere } from './chat-sidebar';
@@ -43,11 +42,23 @@ const BOTTOM_SLACK_PX = 48;
 /** Tailwind `lg`: from here the history is a persistent aside, not a drawer. */
 const DESKTOP_QUERY = '(min-width: 64rem)';
 
+/** They work without a scope: the api lists the user's documents, with dates, for the model. */
 export const EXAMPLE_PROMPTS = [
-  'Summarize the key points of my latest document',
+  'What are the key points across my documents?',
   'What deadlines or dates are mentioned?',
-  'List any obligations or risks, with page references',
+  'Which of my documents is the most recent?',
 ] as const;
+
+/** Longest document name shown in the "Search in" options (full name in a tooltip). */
+const SCOPE_NAME_MAX = 40;
+
+/** Shortens a long file name for an option, keeping its extension. */
+export function shortDocumentName(name: string, max = SCOPE_NAME_MAX): string {
+  if (name.length <= max) return name;
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : '';
+  return `${name.slice(0, max - ext.length - 1).trimEnd()}…${ext}`;
+}
 
 /** `[n]` numbers an answer refers to, in order of first mention. */
 function referencedNumbers(text: string): Set<number> {
@@ -71,6 +82,7 @@ function referencedNumbers(text: string): Set<number> {
   providers: [
     ChatStore,
     ChatModels,
+    ChatDocuments,
     ConversationList,
     provideIcons({ lucidePanelLeft, lucidePlus }),
   ],
@@ -90,15 +102,8 @@ export class ChatPage {
   /** Route param (`chat/:conversationId`), bound by the router. */
   readonly conversationId = input<string>();
 
-  private readonly documents = httpResource<ListDocumentsResponse>(
-    () => '/api/documents',
-  );
-  /** Loaded and none is ready to search: point to the documents page. */
-  protected readonly needsDocuments = computed(
-    () =>
-      this.documents.hasValue() &&
-      !this.documents.value().documents.some((d) => d.status === 'ready'),
-  );
+  protected readonly documents = inject(ChatDocuments);
+  protected readonly shortName = shortDocumentName;
 
   protected readonly draft = signal('');
   protected readonly examples = EXAMPLE_PROMPTS;

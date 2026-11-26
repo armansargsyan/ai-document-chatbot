@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { deleteApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -81,7 +82,9 @@ describe.skipIf(!onEmulators)(
         ['Another user refund.', [1, 0, 0]],
       ]);
 
-      const result = await retrieval.retrieve(uid, 'How do refunds work?', 2);
+      const result = await retrieval.retrieve(uid, 'How do refunds work?', {
+        topK: 2,
+      });
 
       expect(result.map((r) => r.text)).toEqual([
         'Refunds are issued within 14 days.',
@@ -93,6 +96,43 @@ describe.skipIf(!onEmulators)(
         page: 1,
       });
       expect(result[0].distance).toBeLessThan(result[1].distance);
+    });
+
+    it('searches only the chosen document when scoped', async () => {
+      const owner = `${uid}-scoped`;
+      await addDoc(owner, 'ready', [
+        ['Refunds from the closest document.', [1, 0, 0]],
+      ]);
+      const chosen = await addDoc(owner, 'ready', [
+        ['Refunds in the chosen document.', [0.8, 0.2, 0]],
+        ['Shipping in the chosen document.', [0, 1, 0]],
+      ]);
+
+      const result = await retrieval.retrieve(owner, 'How do refunds work?', {
+        documentId: chosen,
+      });
+
+      expect(result.map((r) => r.text)).toEqual([
+        'Refunds in the chosen document.',
+        'Shipping in the chosen document.',
+      ]);
+      expect(result.every((r) => r.documentId === chosen)).toBe(true);
+    });
+
+    it('rejects a scoped search of another user’s or a processing document', async () => {
+      const owner = `${uid}-scope-checks`;
+      const processing = await addDoc(owner, 'processing', [
+        ['Refund draft.', [1, 0, 0]],
+      ]);
+      const others = await addDoc(`${owner}-other`, 'ready', [
+        ['Other refund.', [1, 0, 0]],
+      ]);
+      await expect(
+        retrieval.retrieve(owner, 'refund?', { documentId: others }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        retrieval.retrieve(owner, 'refund?', { documentId: processing }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   },
 );

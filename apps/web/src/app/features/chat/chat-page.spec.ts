@@ -25,7 +25,7 @@ import {
 } from '../../core/auth/testing/fake-auth-client';
 import { FETCH } from './chat-api';
 import { MODEL_STORAGE } from './chat-models';
-import { ChatPage } from './chat-page';
+import { ChatPage, EXAMPLE_PROMPTS, shortDocumentName } from './chat-page';
 import { chatRoute } from './chat-route';
 import {
   CITATIONS,
@@ -154,6 +154,20 @@ describe('ChatPage', () => {
     await stable();
   }
 
+  /** Like {@link typeAndSend}, for when a pending request keeps the app unstable. */
+  async function sendWithoutWaiting(text: string) {
+    const input = must<HTMLTextAreaElement>(
+      el(),
+      '[data-testid="composer-input"]',
+    );
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    TestBed.tick();
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }),
+    );
+  }
+
   /** Waits until the async stream consumer has caught up. */
   async function until(check: () => void) {
     await vi.waitFor(async () => {
@@ -184,7 +198,13 @@ describe('ChatPage', () => {
       expect(q('upload-cta')).toBeNull();
 
       const examples = all('example-prompt');
-      expect(examples.length).toBeGreaterThanOrEqual(3);
+      // None needs a scope; the api gives the model the document list with dates.
+      expect(examples.map((e) => e.textContent?.trim())).toEqual([
+        'What are the key points across my documents?',
+        'What deadlines or dates are mentioned?',
+        'Which of my documents is the most recent?',
+      ]);
+      expect(EXAMPLE_PROMPTS.join(' ')).not.toContain('latest document');
       examples[1].click();
       await stable();
       expect(q<HTMLTextAreaElement>('composer-input')?.value).toBe(
@@ -244,6 +264,218 @@ describe('ChatPage', () => {
       expect(
         el().querySelector<HTMLSelectElement>('#chat-model')?.disabled,
       ).toBe(true);
+    });
+  });
+
+  describe('search in', () => {
+    const OLDER: DocumentSummary = {
+      ...READY_DOC,
+      id: 'doc-old',
+      name: 'House rules.pdf',
+      createdAt: '2026-11-01T10:00:00.000Z',
+    };
+    const NEWEST: DocumentSummary = {
+      ...READY_DOC,
+      id: 'doc-new',
+      name: 'Insurance policy.pdf',
+      createdAt: '2026-11-25T10:00:00.000Z',
+    };
+    const DOCS: DocumentSummary[] = [
+      OLDER,
+      { ...READY_DOC, id: 'doc-busy', name: 'Busy.pdf', status: 'processing' },
+      READY_DOC,
+      { ...READY_DOC, id: 'doc-bad', name: 'Broken.pdf', status: 'failed' },
+      NEWEST,
+    ];
+    const scopeSelect = () => must<HTMLSelectElement>(el(), '#chat-scope');
+    async function pick(value: string) {
+      const select = scopeSelect();
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
+      await stable();
+    }
+    /**
+     * A scoped 404/409 reloads the list. That request keeps the app unstable,
+     * so wait for it without `stable()` and flush it first.
+     */
+    async function flushDocumentsReload(documents: DocumentSummary[]) {
+      const req = await vi.waitFor(() => {
+        TestBed.tick();
+        return httpMock.expectOne('/api/documents');
+      });
+      req.flush({ documents });
+      await stable();
+    }
+    function done(conversationId = 'c-new') {
+      fake.events(
+        { type: 'delta', text: 'Rent is due on the 1st [1].' },
+        {
+          type: 'done',
+          modelId: 'claude-haiku-5-5',
+          conversationId,
+          citations: CITATIONS,
+        },
+      );
+    }
+
+    it('lists ready documents newest first after "All documents", the default', async () => {
+      await render('/chat', { documents: DOCS });
+      // A visible label: the picker must not read as a second model pill.
+      const label = must<HTMLLabelElement>(el(), 'label[for="chat-scope"]');
+      expect(label.textContent?.trim()).toBe('Search in');
+      expect(label.classList.contains('sr-only')).toBe(false);
+      const select = scopeSelect();
+      expect(
+        [...select.options].map((o) => [o.value, o.textContent?.trim()]),
+      ).toEqual([
+        ['', 'All documents'],
+        ['doc-new', 'Insurance policy.pdf'],
+        ['doc-1', 'Lease agreement.pdf'],
+        ['doc-old', 'House rules.pdf'],
+      ]);
+      expect(select.value).toBe('');
+    });
+
+    it('is hidden when no document is ready', async () => {
+      await render('/chat', {
+        documents: [{ ...READY_DOC, status: 'processing' }],
+      });
+      expect(el().querySelector('#chat-scope')).toBeNull();
+      expect(q('upload-cta')).not.toBeNull();
+    });
+
+    it('shortens long names in the options and keeps the full name as a tooltip', async () => {
+      const name = `${'Quarterly financial statement '.repeat(3)}2026.pdf`;
+      await render('/chat', { documents: [{ ...READY_DOC, name }] });
+      const option = scopeSelect().options[1];
+      expect(option.textContent?.trim()).toBe(shortDocumentName(name));
+      expect(option.textContent?.trim().length).toBeLessThanOrEqual(40);
+      expect(option.textContent?.trim().endsWith('….pdf')).toBe(true);
+      expect(option.title).toBe(name);
+      expect(option.getAttribute('aria-label')).toBe(name);
+    });
+
+    it('sends the picked document, labels the answer and keeps the scope for the next turn', async () => {
+      await render();
+      done();
+      await typeAndSend('Everything?');
+      await until(() => expect(all('assistant-message')).toHaveLength(1));
+      await until(() =>
+        expect(q('assistant-message')?.dataset['status']).toBe('done'),
+      );
+      expect(fake.body()).not.toHaveProperty('documentId');
+      expect(q('scope-label')).toBeNull();
+
+      await pick('doc-1');
+      done();
+      await typeAndSend('When is rent due?');
+      await until(() => expect(all('scope-label')).toHaveLength(1));
+      expect(fake.body().documentId).toBe('doc-1');
+      expect(q('scope-label')?.textContent?.trim()).toBe(
+        'Searched: Lease agreement.pdf',
+      );
+
+      // Still scoped for the next turn in this conversation.
+      expect(scopeSelect().value).toBe('doc-1');
+      done();
+      await typeAndSend('And the deposit?');
+      await until(() => expect(all('scope-label')).toHaveLength(2));
+      expect(fake.body()).toMatchObject({
+        conversationId: 'c-new',
+        documentId: 'doc-1',
+      });
+
+      // "All documents" again: the request has no documentId.
+      await pick('');
+      done();
+      await typeAndSend('Anything else?');
+      await until(() => expect(all('assistant-message')).toHaveLength(4));
+      await until(() =>
+        expect(all('assistant-message')[3].dataset['status']).toBe('done'),
+      );
+      expect(fake.body()).not.toHaveProperty('documentId');
+      expect(all('scope-label')).toHaveLength(2);
+    });
+
+    it('resets to "All documents" on New chat', async () => {
+      await render();
+      await pick('doc-1');
+      must<HTMLAnchorElement>(el(), '[data-testid="toolbar-new-chat"]').click();
+      await stable();
+      expect(scopeSelect().value).toBe('');
+    });
+
+    it('resets to "All documents" when another conversation is opened', async () => {
+      await render();
+      await pick('doc-1');
+      await harness.navigateByUrl('/chat/c-old');
+      TestBed.tick();
+      httpMock.expectOne('/api/conversations/c-old').flush({
+        id: 'c-old',
+        title: 'Old',
+        createdAt: '2026-11-24T10:00:00.000Z',
+        updatedAt: '2026-11-24T10:00:00.000Z',
+        messageCount: 0,
+        messages: [],
+      } satisfies ConversationDetail);
+      await stable();
+      expect(scopeSelect().value).toBe('');
+    });
+
+    it('retries with the same scope', async () => {
+      await render();
+      await pick('doc-1');
+      fake.json(500, { statusCode: 500, message: 'boom' });
+      await typeAndSend('Hi');
+      await until(() => expect(q('retry-button')).not.toBeNull());
+
+      done();
+      q<HTMLButtonElement>('retry-button')?.click();
+      await until(() => expect(q('scope-label')).not.toBeNull());
+      expect(fake.body()).toMatchObject({ message: 'Hi', documentId: 'doc-1' });
+    });
+
+    it('shows a 409 inline and falls back to "All documents" once the document is gone', async () => {
+      await render('/chat', { documents: [READY_DOC, OLDER] });
+      await pick('doc-1');
+      const message =
+        "That document isn't ready yet; try again once it has finished processing";
+      fake.json(409, { statusCode: 409, message, code: 'document_not_ready' });
+      await sendWithoutWaiting('Hi');
+      // The list is refreshed; the document has failed meanwhile.
+      await flushDocumentsReload([{ ...READY_DOC, status: 'failed' }, OLDER]);
+      await until(() => expect(q('turn-error')).not.toBeNull());
+      expect(q('turn-error')?.textContent).toContain(message);
+      expect(scopeSelect().value).toBe('');
+      expect([...scopeSelect().options].map((o) => o.value)).toEqual([
+        '',
+        'doc-old',
+      ]);
+    });
+
+    it('shows a 404 for a deleted document inline', async () => {
+      await render();
+      await pick('doc-1');
+      fake.json(404, {
+        statusCode: 404,
+        message: 'Document not found',
+        code: 'document_not_found',
+      });
+      await sendWithoutWaiting('Hi');
+      await flushDocumentsReload([]);
+      await until(() => expect(q('turn-error')).not.toBeNull());
+      expect(q('turn-error')?.textContent).toContain(
+        'Document not found. Retry will search all documents.',
+      );
+      expect(el().querySelector('#chat-scope')).toBeNull();
+
+      done();
+      q<HTMLButtonElement>('retry-button')?.click();
+      await until(() =>
+        expect(q('assistant-message')?.dataset['status']).toBe('done'),
+      );
+      expect(fake.body()).not.toHaveProperty('documentId');
+      expect(q('scope-label')).toBeNull();
     });
   });
 

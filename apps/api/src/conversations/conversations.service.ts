@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   type ChatMessage,
   type Citation,
@@ -12,10 +12,14 @@ import {
   ConversationRepository,
   toSummary,
 } from './conversation.repository';
+import { chatNotFound } from '../common/chat-errors';
 
 /** Previous messages sent to the model as context. */
 export const HISTORY_MESSAGES = 10;
 const TITLE_FROM_MESSAGE_LENGTH = 60;
+
+const conversationNotFound = () =>
+  chatNotFound('Conversation not found', 'conversation_not_found');
 
 export function titleFromMessage(message: string): string {
   const oneLine = message.replace(/\s+/g, ' ').trim();
@@ -124,7 +128,7 @@ export class ConversationsService {
       return await write;
     } catch (error) {
       if (error instanceof ConversationGoneError) {
-        throw new NotFoundException('Conversation not found');
+        throw conversationNotFound();
       }
       throw error;
     }
@@ -133,7 +137,7 @@ export class ConversationsService {
   private async requireOwned(uid: string, id: string) {
     // Paths are under users/{uid}, so another user's id simply doesn't exist here.
     const record = await this.repository.get(uid, id);
-    if (!record) throw new NotFoundException('Conversation not found');
+    if (!record) throw conversationNotFound();
     return record;
   }
 }

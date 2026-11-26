@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { DocumentsModule } from '../documents/documents.module';
 import { LlmModule } from '../llm/llm.module';
 import { RetrievalModule } from '../retrieval/retrieval.module';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 
 @Module({
-  imports: [LlmModule, RetrievalModule, ConversationsModule],
+  imports: [LlmModule, RetrievalModule, ConversationsModule, DocumentsModule],
   controllers: [ChatController],
   providers: [ChatService],
 })

@@ -24,6 +24,10 @@ export const chatRequestSchema = z
       .string()
       .regex(/^[A-Za-z0-9]{20}$/, { error: 'conversationId is invalid' })
       .optional(),
+    documentId: z
+      .string()
+      .regex(/^[A-Za-z0-9]{20}$/, { error: 'documentId is invalid' })
+      .optional(),
   })
   .strict() satisfies z.ZodType<ChatRequest>;
 
