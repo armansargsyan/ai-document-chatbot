@@ -298,3 +298,7 @@ Useful extras: `npx nx graph` shows the project graph, and `npx nx g @spartan-ng
 **Arman Sargsyan**, Full-Stack & AI Engineer
 
 [LinkedIn](https://www.linkedin.com/in/arman-sargsyan-a12a17153/) · [GitHub](https://github.com/armansargsyan)
+
+## License
+
+[MIT](LICENSE) © 2026 Arman Sargsyan
